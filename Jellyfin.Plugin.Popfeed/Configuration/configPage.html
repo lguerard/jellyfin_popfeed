@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Popfeed</title>
+    <style>
+      .popfeedSection {
+        margin-bottom: 2rem;
+      }
+
+      .popfeedRowCard,
+      .popfeedResultCard {
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .popfeedGrid {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .popfeedActions {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-top: 0.75rem;
+      }
+
+      .popfeedMonospace {
+        font-family: Consolas, monospace;
+        word-break: break-all;
+      }
+
+      .popfeedMuted {
+        opacity: 0.75;
+      }
+
+      .popfeedStatusBox {
+        white-space: pre-wrap;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        min-height: 4rem;
+      }
+
+      .popfeedStatusSuccess {
+        border-left: 3px solid #3ba55c;
+      }
+
+      .popfeedStatusFailure {
+        border-left: 3px solid #d9534f;
+      }
+
+      .popfeedStatusHeader {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="PopfeedConfigPage"
+      data-role="page"
+      class="page type-interior pluginConfigurationPage"
+      data-require="emby-input,emby-button,emby-checkbox,emby-select"
+    >
+      <div data-role="content">
+        <div class="content-primary">
+          <form id="PopfeedConfigForm">
+            <div class="popfeedSection">
+              <div class="selectContainer">
+                <label class="selectLabel" for="WatchStateProvider"
+                  >Watch State Strategy</label
+                >
+                <select
+                  is="emby-select"
+                  id="WatchStateProvider"
+                  class="emby-select-withcolor emby-select"
+                >
+                  <option value="popfeed-watched-list">
+                    Popfeed watched list items
+                  </option>
+                </select>
+                <div class="fieldDescription">
+                  This version stores watched state in a Popfeed list because
+                  Popfeed does not currently expose a dedicated watched-history
+                  record.
+                </div>
+              </div>
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input id="SyncMovies" type="checkbox" is="emby-checkbox" />
+                  <span>Sync Movies</span>
+                </label>
+              </div>
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input id="SyncEpisodes" type="checkbox" is="emby-checkbox" />
+                  <span>Sync Episodes</span>
+                </label>
+              </div>
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input
+                    id="RemoveFromWatchedListWhenUnplayed"
+                    type="checkbox"
+                    is="emby-checkbox"
+                  />
+                  <span>Remove on Unwatch</span>
+                </label>
+              </div>
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input
+                    id="EnableDebugLogging"
+                    type="checkbox"
+                    is="emby-checkbox"
+                  />
+                  <span>Enable Debug Logging</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="popfeedSection">
+              <h2>Per-User Popfeed Accounts</h2>
+              <div class="fieldDescription">
+                Add one row per Jellyfin user you want to sync. Each row maps
+                one Jellyfin user to one Popfeed ATProto account.
+              </div>
+              <div id="PopfeedUserMappings"></div>
+              <div class="popfeedActions">
+                <button
+                  is="emby-button"
+                  type="button"
+                  class="raised emby-button"
+                  id="AddMappingButton"
+                >
+                  <span>Add User Mapping</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="popfeedSection">
+              <h2>Excluded Titles</h2>
+              <div class="fieldDescription">
+                Search for a movie, series, or episode and add it to the
+                exclusion list. Excluding a series blocks all of its episodes
+                from automatic Popfeed sync.
+              </div>
+
+              <div class="popfeedGrid">
+                <div class="inputContainer">
+                  <label
+                    class="inputLabel inputLabelUnfocused"
+                    for="ExclusionSearchTerm"
+                    >Search Library</label
+                  >
+                  <input id="ExclusionSearchTerm" type="text" is="emby-input" />
+                </div>
+                <div class="selectContainer">
+                  <label class="selectLabel" for="ExclusionSearchUser"
+                    >Scope Search To User</label
+                  >
+                  <select
+                    is="emby-select"
+                    id="ExclusionSearchUser"
+                    class="emby-select-withcolor emby-select"
+                  ></select>
+                </div>
+              </div>
+
+              <div class="popfeedActions">
+                <button
+                  is="emby-button"
+                  type="button"
+                  class="raised emby-button"
+                  id="SearchExclusionsButton"
+                >
+                  <span>Search</span>
+                </button>
+              </div>
+
+              <div id="ExclusionSearchResults"></div>
+              <div id="ExcludedItemsList"></div>
+            </div>
+
+            <div class="popfeedSection">
+              <h2>Test Sync</h2>
+              <div class="fieldDescription">
+                Run a dry run or a real sync for a selected Jellyfin user and
+                item without waiting for a watched toggle event.
+              </div>
+
+              <div class="popfeedGrid">
+                <div class="selectContainer">
+                  <label class="selectLabel" for="TestUserId"
+                    >Jellyfin User</label
+                  >
+                  <select
+                    is="emby-select"
+                    id="TestUserId"
+                    class="emby-select-withcolor emby-select"
+                  ></select>
+                </div>
+                <div class="inputContainer">
+                  <label
+                    class="inputLabel inputLabelUnfocused"
+                    for="TestSearchTerm"
+                    >Search Item</label
+                  >
+                  <input id="TestSearchTerm" type="text" is="emby-input" />
+                </div>
+              </div>
+
+              <div class="popfeedActions">
+                <button
+                  is="emby-button"
+                  type="button"
+                  class="raised emby-button"
+                  id="SearchTestItemsButton"
+                >
+                  <span>Search Test Item</span>
+                </button>
+              </div>
+
+              <div id="TestSearchResults"></div>
+
+              <div class="inputContainer">
+                <label class="inputLabel" for="SelectedTestItemDisplay"
+                  >Selected Item</label
+                >
+                <div id="SelectedTestItemDisplay" class="popfeedStatusBox">
+                  No item selected.
+                </div>
+              </div>
+
+              <input id="SelectedTestItemId" type="hidden" />
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input
+                    id="TestPlayed"
+                    type="checkbox"
+                    is="emby-checkbox"
+                    checked
+                  />
+                  <span>Treat Item As Watched</span>
+                </label>
+              </div>
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input
+                    id="TestDryRun"
+                    type="checkbox"
+                    is="emby-checkbox"
+                    checked
+                  />
+                  <span>Dry Run Only</span>
+                </label>
+              </div>
+
+              <div class="popfeedActions">
+                <button
+                  is="emby-button"
+                  type="button"
+                  class="raised emby-button"
+                  id="RunTestSyncButton"
+                >
+                  <span>Run Test Sync</span>
+                </button>
+              </div>
+
+              <div id="TestSyncResult" class="popfeedStatusBox">
+                No test run yet.
+              </div>
+            </div>
+
+            <div class="popfeedSection">
+              <h2>Recent Sync Activity</h2>
+              <div class="fieldDescription">
+                Review the latest Popfeed sync outcomes without opening the
+                server logs. This includes live event-driven syncs and manual
+                test runs.
+              </div>
+
+              <div class="popfeedGrid">
+                <div class="selectContainer">
+                  <label class="selectLabel" for="StatusUserId"
+                    >Filter By User</label
+                  >
+                  <select
+                    is="emby-select"
+                    id="StatusUserId"
+                    class="emby-select-withcolor emby-select"
+                  ></select>
+                </div>
+              </div>
+
+              <div class="popfeedActions">
+                <button
+                  is="emby-button"
+                  type="button"
+                  class="raised emby-button"
+                  id="RefreshStatusButton"
+                >
+                  <span>Refresh Activity</span>
+                </button>
+              </div>
+
+              <div id="RecentStatusList"></div>
+            </div>
+
+            <div>
+              <button
+                is="emby-button"
+                type="submit"
+                class="raised button-submit block emby-button"
+              >
+                <span>Save</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <script type="text/javascript">
+        var PopfeedConfig = {
+          pluginUniqueId: "14af54bf-b9d9-4c8a-8c16-a8e993f8ec08",
+          users: [],
+          excludedItems: [],
+        };
+
+        function apiGet(path) {
+          return fetch(ApiClient.getUrl(path)).then(function (response) {
+            if (!response.ok) {
+              throw new Error("Request failed: " + response.status);
+            }
+            return response.json();
+          });
+        }
+
+        function apiPost(path, payload) {
+          return fetch(ApiClient.getUrl(path), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          }).then(function (response) {
+            if (!response.ok) {
+              return response
+                .json()
+                .then(function (body) {
+                  throw new Error(body.message || JSON.stringify(body));
+                })
+                .catch(function () {
+                  throw new Error("Request failed: " + response.status);
+                });
+            }
+            return response.json();
+          });
+        }
+
+        function setSelectOptions(select, users, includeBlank, blankLabel) {
+          select.innerHTML = "";
+          if (includeBlank) {
+            var blank = document.createElement("option");
+            blank.value = "";
+            blank.textContent = blankLabel || "All Users";
+            select.appendChild(blank);
+          }
+
+          users.forEach(function (user) {
+            var option = document.createElement("option");
+            option.value = user.Id;
+            option.textContent = user.Name + " (" + user.Id + ")";
+            select.appendChild(option);
+          });
+        }
+
+        function createInput(labelText, className, type, value) {
+          var container = document.createElement("div");
+          container.className =
+            type === "checkbox"
+              ? "checkboxContainer checkboxContainer-withDescription"
+              : "inputContainer";
+
+          if (type === "checkbox") {
+            var checkboxLabel = document.createElement("label");
+            checkboxLabel.className = "emby-checkbox-label";
+            var input = document.createElement("input");
+            input.type = "checkbox";
+            input.setAttribute("is", "emby-checkbox");
+            input.className = className;
+            input.checked = !!value;
+            var span = document.createElement("span");
+            span.textContent = labelText;
+            checkboxLabel.appendChild(input);
+            checkboxLabel.appendChild(span);
+            container.appendChild(checkboxLabel);
+            return { container: container, input: input };
+          }
+
+          var label = document.createElement("label");
+          label.className = "inputLabel inputLabelUnfocused";
+          label.textContent = labelText;
+          var textInput = document.createElement("input");
+          textInput.type = type;
+          textInput.setAttribute("is", "emby-input");
+          textInput.className = className;
+          textInput.value = value || "";
+          container.appendChild(label);
+          container.appendChild(textInput);
+          return { container: container, input: textInput };
+        }
+
+        function createUserMappingRow(mapping) {
+          var row = document.createElement("div");
+          row.className = "popfeedRowCard";
+
+          var grid = document.createElement("div");
+          grid.className = "popfeedGrid";
+
+          var userContainer = document.createElement("div");
+          userContainer.className = "selectContainer";
+          var userLabel = document.createElement("label");
+          userLabel.className = "selectLabel";
+          userLabel.textContent = "Jellyfin User";
+          var userSelect = document.createElement("select");
+          userSelect.setAttribute("is", "emby-select");
+          userSelect.className =
+            "emby-select-withcolor emby-select mapping-user-id";
+          setSelectOptions(userSelect, PopfeedConfig.users, false);
+          userSelect.value = mapping.JellyfinUserId || "";
+          userContainer.appendChild(userLabel);
+          userContainer.appendChild(userSelect);
+          grid.appendChild(userContainer);
+
+          var identifier = createInput(
+            "ATProto Identifier",
+            "mapping-identifier",
+            "text",
+            mapping.Identifier,
+          );
+          var password = createInput(
+            "App Password",
+            "mapping-password",
+            "password",
+            mapping.AppPassword,
+          );
+          var pds = createInput(
+            "PDS URL",
+            "mapping-pds-url",
+            "text",
+            mapping.PdsUrl || "https://bsky.social",
+          );
+          var listName = createInput(
+            "Watched List Name",
+            "mapping-watched-list-name",
+            "text",
+            mapping.WatchedListName || "Watched",
+          );
+          var enabled = createInput(
+            "Enabled",
+            "mapping-enabled",
+            "checkbox",
+            mapping.Enabled !== false,
+          );
+
+          grid.appendChild(identifier.container);
+          grid.appendChild(password.container);
+          grid.appendChild(pds.container);
+          grid.appendChild(listName.container);
+          grid.appendChild(enabled.container);
+          row.appendChild(grid);
+
+          var watchedListUri = document.createElement("input");
+          watchedListUri.type = "hidden";
+          watchedListUri.className = "mapping-watched-list-uri";
+          watchedListUri.value = mapping.WatchedListUri || "";
+          row.appendChild(watchedListUri);
+
+          var actions = document.createElement("div");
+          actions.className = "popfeedActions";
+          var removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.setAttribute("is", "emby-button");
+          removeButton.className = "raised emby-button";
+          removeButton.innerHTML = "<span>Remove Mapping</span>";
+          removeButton.addEventListener("click", function () {
+            row.remove();
+          });
+          actions.appendChild(removeButton);
+          row.appendChild(actions);
+
+          document.querySelector("#PopfeedUserMappings").appendChild(row);
+        }
+
+        function getUserMappings() {
+          return Array.from(
+            document.querySelectorAll("#PopfeedUserMappings .popfeedRowCard"),
+          )
+            .map(function (row) {
+              return {
+                JellyfinUserId: row.querySelector(".mapping-user-id").value,
+                Identifier: row.querySelector(".mapping-identifier").value,
+                AppPassword: row.querySelector(".mapping-password").value,
+                PdsUrl: row.querySelector(".mapping-pds-url").value,
+                WatchedListName: row.querySelector(".mapping-watched-list-name")
+                  .value,
+                Enabled: row.querySelector(".mapping-enabled").checked,
+                WatchedListUri: row.querySelector(".mapping-watched-list-uri")
+                  .value,
+              };
+            })
+            .filter(function (mapping) {
+              return !!mapping.JellyfinUserId;
+            });
+        }
+
+        function renderExcludedItems() {
+          var container = document.querySelector("#ExcludedItemsList");
+          container.innerHTML = "";
+
+          if (PopfeedConfig.excludedItems.length === 0) {
+            container.innerHTML =
+              '<div class="fieldDescription">No items are excluded.</div>';
+            return;
+          }
+
+          PopfeedConfig.excludedItems.forEach(function (item, index) {
+            var card = document.createElement("div");
+            card.className = "popfeedRowCard";
+
+            var title = document.createElement("div");
+            title.textContent = item.label;
+            card.appendChild(title);
+
+            var id = document.createElement("div");
+            id.className = "popfeedMonospace";
+            id.textContent = item.id;
+            card.appendChild(id);
+
+            var removeButton = document.createElement("button");
+            removeButton.type = "button";
+            removeButton.setAttribute("is", "emby-button");
+            removeButton.className = "raised emby-button";
+            removeButton.innerHTML = "<span>Remove Exclusion</span>";
+            removeButton.addEventListener("click", function () {
+              PopfeedConfig.excludedItems.splice(index, 1);
+              renderExcludedItems();
+            });
+            card.appendChild(removeButton);
+            container.appendChild(card);
+          });
+        }
+
+        function addExcludedItem(id, label) {
+          if (
+            PopfeedConfig.excludedItems.some(function (item) {
+              return item.id === id;
+            })
+          ) {
+            return;
+          }
+
+          PopfeedConfig.excludedItems.push({ id: id, label: label });
+          renderExcludedItems();
+        }
+
+        function renderSearchResults(
+          containerSelector,
+          items,
+          addLabelBuilder,
+          onAdd,
+        ) {
+          var container = document.querySelector(containerSelector);
+          container.innerHTML = "";
+
+          if (!items.length) {
+            container.innerHTML =
+              '<div class="fieldDescription">No matching items found.</div>';
+            return;
+          }
+
+          items.forEach(function (item) {
+            var card = document.createElement("div");
+            card.className = "popfeedResultCard";
+
+            var title = document.createElement("div");
+            title.textContent = item.Name + " [" + item.ItemType + "]";
+            card.appendChild(title);
+
+            if (item.SeriesName) {
+              var series = document.createElement("div");
+              series.textContent = "Series: " + item.SeriesName;
+              card.appendChild(series);
+            }
+
+            var id = document.createElement("div");
+            id.className = "popfeedMonospace";
+            id.textContent = item.Id;
+            card.appendChild(id);
+
+            var addButton = document.createElement("button");
+            addButton.type = "button";
+            addButton.setAttribute("is", "emby-button");
+            addButton.className = "raised emby-button";
+            addButton.innerHTML = "<span>" + addLabelBuilder(item) + "</span>";
+            addButton.addEventListener("click", function () {
+              onAdd(item);
+            });
+            card.appendChild(addButton);
+
+            if (item.SeriesId) {
+              var addSeriesButton = document.createElement("button");
+              addSeriesButton.type = "button";
+              addSeriesButton.setAttribute("is", "emby-button");
+              addSeriesButton.className = "raised emby-button";
+              addSeriesButton.innerHTML = "<span>Add Series Exclusion</span>";
+              addSeriesButton.addEventListener("click", function () {
+                addExcludedItem(item.SeriesId, item.SeriesName + " [Series]");
+              });
+              card.appendChild(addSeriesButton);
+            }
+
+            container.appendChild(card);
+          });
+        }
+
+        function setSelectedTestItem(item) {
+          document.querySelector("#SelectedTestItemId").value = item.Id;
+          document.querySelector("#SelectedTestItemDisplay").textContent =
+            item.Name + " [" + item.ItemType + "]\n" + item.Id;
+        }
+
+        function formatTimestamp(timestampUtc) {
+          if (!timestampUtc) {
+            return "Unknown time";
+          }
+
+          var date = new Date(timestampUtc);
+          return date.toLocaleString();
+        }
+
+        function renderRecentStatuses(entries) {
+          var container = document.querySelector("#RecentStatusList");
+          container.innerHTML = "";
+
+          if (!entries.length) {
+            container.innerHTML =
+              '<div class="fieldDescription">No sync activity recorded yet in this server session.</div>';
+            return;
+          }
+
+          entries.forEach(function (entry) {
+            var card = document.createElement("div");
+            card.className =
+              "popfeedRowCard " +
+              (entry.Success ? "popfeedStatusSuccess" : "popfeedStatusFailure");
+
+            var header = document.createElement("div");
+            header.className = "popfeedStatusHeader";
+
+            var title = document.createElement("div");
+            title.textContent =
+              (entry.ItemName || "Unknown item") +
+              (entry.UserName ? " | " + entry.UserName : "");
+            header.appendChild(title);
+
+            var time = document.createElement("div");
+            time.className = "popfeedMuted";
+            time.textContent = formatTimestamp(entry.TimestampUtc);
+            header.appendChild(time);
+            card.appendChild(header);
+
+            var summary = document.createElement("div");
+            summary.textContent =
+              (entry.TriggerSource || "event") +
+              " | " +
+              (entry.Played ? "watched" : "unwatched") +
+              " | " +
+              (entry.Executed ? "remote write" : "no remote write");
+            card.appendChild(summary);
+
+            var message = document.createElement("div");
+            message.className = "popfeedMuted";
+            message.textContent = entry.Message || "No message.";
+            card.appendChild(message);
+
+            var details = document.createElement("div");
+            details.className = "popfeedMonospace popfeedMuted";
+            details.textContent = entry.ItemId;
+            card.appendChild(details);
+
+            container.appendChild(card);
+          });
+        }
+
+        function loadRecentStatuses() {
+          var userId = document.querySelector("#StatusUserId").value;
+          var path = "Popfeed/Status?limit=12";
+          if (userId) {
+            path += "&userId=" + encodeURIComponent(userId);
+          }
+
+          apiGet(path)
+            .then(function (entries) {
+              renderRecentStatuses(entries);
+            })
+            .catch(function (error) {
+              document.querySelector("#RecentStatusList").innerHTML =
+                '<div class="fieldDescription">' +
+                (error.message || String(error)) +
+                "</div>";
+            });
+        }
+
+        function loadConfigPage() {
+          Dashboard.showLoadingMsg();
+          Promise.all([
+            ApiClient.getPluginConfiguration(PopfeedConfig.pluginUniqueId),
+            apiGet("Popfeed/Users"),
+            apiGet("Popfeed/Status?limit=12"),
+          ])
+            .then(function (results) {
+              var config = results[0];
+              var users = results[1];
+              var statuses = results[2];
+
+              PopfeedConfig.users = users;
+              PopfeedConfig.excludedItems = (config.ExcludedItemIds || []).map(
+                function (id) {
+                  return { id: id, label: id };
+                },
+              );
+
+              document.querySelector("#WatchStateProvider").value =
+                config.WatchStateProvider || "popfeed-watched-list";
+              document.querySelector("#SyncMovies").checked =
+                !!config.SyncMovies;
+              document.querySelector("#SyncEpisodes").checked =
+                !!config.SyncEpisodes;
+              document.querySelector(
+                "#RemoveFromWatchedListWhenUnplayed",
+              ).checked = !!config.RemoveFromWatchedListWhenUnplayed;
+              document.querySelector("#EnableDebugLogging").checked =
+                !!config.EnableDebugLogging;
+
+              setSelectOptions(
+                document.querySelector("#ExclusionSearchUser"),
+                users,
+                true,
+                "All Users",
+              );
+              setSelectOptions(
+                document.querySelector("#TestUserId"),
+                users,
+                false,
+              );
+              setSelectOptions(
+                document.querySelector("#StatusUserId"),
+                users,
+                true,
+                "All Users",
+              );
+
+              document.querySelector("#PopfeedUserMappings").innerHTML = "";
+              (config.PopfeedUsers || []).forEach(function (mapping) {
+                createUserMappingRow(mapping);
+              });
+
+              if ((config.PopfeedUsers || []).length === 0) {
+                createUserMappingRow({
+                  Enabled: true,
+                  PdsUrl: "https://bsky.social",
+                  WatchedListName: "Watched",
+                });
+              }
+
+              renderExcludedItems();
+              renderRecentStatuses(statuses);
+              Dashboard.hideLoadingMsg();
+            })
+            .catch(function (error) {
+              Dashboard.hideLoadingMsg();
+              Dashboard.alert(error.message || String(error));
+            });
+        }
+
+        document
+          .querySelector("#AddMappingButton")
+          .addEventListener("click", function () {
+            createUserMappingRow({
+              Enabled: true,
+              PdsUrl: "https://bsky.social",
+              WatchedListName: "Watched",
+            });
+          });
+
+        document
+          .querySelector("#SearchExclusionsButton")
+          .addEventListener("click", function () {
+            var searchTerm = document.querySelector(
+              "#ExclusionSearchTerm",
+            ).value;
+            var userId = document.querySelector("#ExclusionSearchUser").value;
+            var path =
+              "Popfeed/Items/Search?searchTerm=" +
+              encodeURIComponent(searchTerm);
+            if (userId) {
+              path += "&userId=" + encodeURIComponent(userId);
+            }
+
+            apiGet(path)
+              .then(function (items) {
+                renderSearchResults(
+                  "#ExclusionSearchResults",
+                  items,
+                  function () {
+                    return "Add Exclusion";
+                  },
+                  function (item) {
+                    addExcludedItem(
+                      item.Id,
+                      item.Name + " [" + item.ItemType + "]",
+                    );
+                  },
+                );
+              })
+              .catch(function (error) {
+                Dashboard.alert(error.message || String(error));
+              });
+          });
+
+        document
+          .querySelector("#SearchTestItemsButton")
+          .addEventListener("click", function () {
+            var searchTerm = document.querySelector("#TestSearchTerm").value;
+            var userId = document.querySelector("#TestUserId").value;
+            var path =
+              "Popfeed/Items/Search?searchTerm=" +
+              encodeURIComponent(searchTerm);
+            if (userId) {
+              path += "&userId=" + encodeURIComponent(userId);
+            }
+
+            apiGet(path)
+              .then(function (items) {
+                renderSearchResults(
+                  "#TestSearchResults",
+                  items,
+                  function () {
+                    return "Select Item";
+                  },
+                  function (item) {
+                    setSelectedTestItem(item);
+                  },
+                );
+              })
+              .catch(function (error) {
+                Dashboard.alert(error.message || String(error));
+              });
+          });
+
+        document
+          .querySelector("#RunTestSyncButton")
+          .addEventListener("click", function () {
+            var userId = document.querySelector("#TestUserId").value;
+            var itemId = document.querySelector("#SelectedTestItemId").value;
+            if (!userId || !itemId) {
+              Dashboard.alert(
+                "Select both a Jellyfin user and a test item first.",
+              );
+              return;
+            }
+
+            document.querySelector("#TestSyncResult").textContent =
+              "Running test...";
+            apiPost("Popfeed/TestSync", {
+              UserId: userId,
+              ItemId: itemId,
+              Played: document.querySelector("#TestPlayed").checked,
+              DryRun: document.querySelector("#TestDryRun").checked,
+            })
+              .then(function (result) {
+                document.querySelector("#TestSyncResult").textContent =
+                  JSON.stringify(result, null, 2);
+                loadRecentStatuses();
+              })
+              .catch(function (error) {
+                document.querySelector("#TestSyncResult").textContent =
+                  error.message || String(error);
+                loadRecentStatuses();
+              });
+          });
+
+        document
+          .querySelector("#RefreshStatusButton")
+          .addEventListener("click", function () {
+            loadRecentStatuses();
+          });
+
+        document
+          .querySelector("#StatusUserId")
+          .addEventListener("change", function () {
+            loadRecentStatuses();
+          });
+
+        document
+          .querySelector("#PopfeedConfigPage")
+          .addEventListener("pageshow", loadConfigPage);
+
+        document
+          .querySelector("#PopfeedConfigForm")
+          .addEventListener("submit", function (e) {
+            Dashboard.showLoadingMsg();
+            ApiClient.getPluginConfiguration(PopfeedConfig.pluginUniqueId)
+              .then(function (config) {
+                config.PopfeedUsers = getUserMappings();
+                config.ExcludedItemIds = PopfeedConfig.excludedItems.map(
+                  function (item) {
+                    return item.id;
+                  },
+                );
+                config.WatchStateProvider = document.querySelector(
+                  "#WatchStateProvider",
+                ).value;
+                config.SyncMovies =
+                  document.querySelector("#SyncMovies").checked;
+                config.SyncEpisodes =
+                  document.querySelector("#SyncEpisodes").checked;
+                config.RemoveFromWatchedListWhenUnplayed =
+                  document.querySelector(
+                    "#RemoveFromWatchedListWhenUnplayed",
+                  ).checked;
+                config.EnableDebugLogging = document.querySelector(
+                  "#EnableDebugLogging",
+                ).checked;
+
+                ApiClient.updatePluginConfiguration(
+                  PopfeedConfig.pluginUniqueId,
+                  config,
+                ).then(function (result) {
+                  Dashboard.processPluginConfigurationUpdateResult(result);
+                });
+              })
+              .catch(function (error) {
+                Dashboard.hideLoadingMsg();
+                Dashboard.alert(error.message || String(error));
+              });
+
+            e.preventDefault();
+            return false;
+          });
+      </script>
+    </div>
+  </body>
+</html>
