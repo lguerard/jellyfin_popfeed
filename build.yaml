@@ -1,0 +1,19 @@
+---
+name: "Popfeed"
+guid: "14af54bf-b9d9-4c8a-8c16-a8e993f8ec08"
+version: "0.1.0.0"
+targetAbi: "10.11.0.0"
+framework: "net9.0"
+owner: "lguer"
+overview: "Sync Jellyfin watched state to Popfeed over ATProto"
+description: >
+  Sync Jellyfin watched and unwatched actions to Popfeed over ATProto. Supports per-user Popfeed account mappings, searchable exclusions, recent activity visibility, and dashboard-triggered dry-run testing.
+category: "General"
+artifacts:
+- "Jellyfin.Plugin.Popfeed.dll"
+changelog: |-
+  - Initial Popfeed sync plugin release
+  - Added per-user Popfeed mappings
+  - Added searchable exclusion UI and dry-run test endpoint
+  - Added recent sync activity panel in the plugin settings page
+  - Added GitHub-release manifest generation for direct Jellyfin repository install
