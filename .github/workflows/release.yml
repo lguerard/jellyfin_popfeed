@@ -2,6 +2,11 @@ name: Build Release Package
 
 on:
     workflow_dispatch:
+        inputs:
+            tag_name:
+                description: Tag name to create for the prerelease, for example v0.1.2-beta.1
+                required: true
+                type: string
     push:
         tags:
             - "v*"
@@ -13,14 +18,15 @@ jobs:
     build:
         runs-on: windows-latest
         env:
-            PLUGIN_ASSET_NAME: Jellyfin.Plugin.Popfeed-${{ github.ref_name }}.zip
+            RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+            PLUGIN_ASSET_NAME: Jellyfin.Plugin.Popfeed-${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}.zip
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Setup .NET 9 SDK
-              uses: actions/setup-dotnet@v4
+              uses: actions/setup-dotnet@v5
               with:
                   dotnet-version: "9.0.x"
 
@@ -29,23 +35,26 @@ jobs:
               run: >-
                   .\build-release.ps1
                   -Configuration Release
-                  -Version ${{ github.ref_name }}
-                  -ManifestSourceUrl https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ env.PLUGIN_ASSET_NAME }}
+                  -Version ${{ env.RELEASE_TAG }}
+                  -ManifestSourceUrl https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/${{ env.PLUGIN_ASSET_NAME }}
                   -ManifestOutputPath artifacts/manifest.json
 
             - name: Upload artifact
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v6
               with:
-                  name: jellyfin-plugin-popfeed-${{ github.ref_name }}
+                  name: jellyfin-plugin-popfeed-${{ env.RELEASE_TAG }}
                   path: |
                       artifacts/${{ env.PLUGIN_ASSET_NAME }}
                       artifacts/manifest.json
 
             - name: Publish GitHub release asset
-              if: startsWith(github.ref, 'refs/tags/')
+              if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
               uses: softprops/action-gh-release@v2
               with:
+                  tag_name: ${{ env.RELEASE_TAG }}
+                  target_commitish: ${{ github.sha }}
                   files: |
                       artifacts/${{ env.PLUGIN_ASSET_NAME }}
                       artifacts/manifest.json
                   generate_release_notes: true
+                  prerelease: ${{ github.event_name == 'workflow_dispatch' }}
