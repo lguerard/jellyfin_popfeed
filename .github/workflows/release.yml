@@ -20,6 +20,8 @@ jobs:
         env:
             RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
             PLUGIN_ASSET_NAME: Jellyfin.Plugin.Popfeed-${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}.zip
+            STABLE_MANIFEST_BRANCH: release-manifest
+            IS_STABLE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
 
         steps:
             - name: Checkout
@@ -58,3 +60,43 @@ jobs:
                       artifacts/manifest.json
                   generate_release_notes: true
                   prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+
+            - name: Update stable Jellyfin manifest
+              if: ${{ env.IS_STABLE_TAG == 'true' }}
+              shell: pwsh
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  $ErrorActionPreference = 'Stop'
+
+                  $manifestBranch = $env:STABLE_MANIFEST_BRANCH
+                  $tempDir = Join-Path $env:RUNNER_TEMP 'stable-manifest'
+                  $repoUrl = "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
+
+                  if (Test-Path $tempDir) {
+                      Remove-Item $tempDir -Recurse -Force
+                  }
+
+                  git clone --depth 1 --branch $manifestBranch $repoUrl $tempDir 2>$null
+                  if ($LASTEXITCODE -ne 0) {
+                      git clone --depth 1 $repoUrl $tempDir
+                      Push-Location $tempDir
+                      git checkout --orphan $manifestBranch
+                      Get-ChildItem -Force | Where-Object { $_.Name -ne '.git' } | Remove-Item -Recurse -Force
+                      Pop-Location
+                  }
+
+                  Copy-Item artifacts/manifest.json (Join-Path $tempDir 'manifest.json') -Force
+
+                  Push-Location $tempDir
+                  git config user.name 'github-actions[bot]'
+                  git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+                  git add manifest.json
+                  git diff --cached --quiet
+                  if ($LASTEXITCODE -eq 0) {
+                      Write-Host 'Stable manifest already up to date.'
+                  } else {
+                      git commit -m "Update stable manifest for $env:RELEASE_TAG"
+                      git push origin HEAD:$manifestBranch --force
+                  }
+                  Pop-Location
