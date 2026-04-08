@@ -46,6 +46,26 @@ Exclusion behavior:
 
 If `EnableDebugLogging` is enabled, the plugin writes detailed decision logs for event handling, exclusion checks, ATProto session creation, list lookup, and record create/delete actions.
 
+## Install
+
+The easiest install path is through a custom Jellyfin plugin repository entry that points to this plugin's `manifest.json`.
+
+Jellyfin expects a manifest URL, not raw JSON pasted into the UI.
+
+For stable releases, use this repository manifest URL in Jellyfin:
+
+```text
+https://raw.githubusercontent.com/lguerard/jellyfin_popfeed/release-manifest/manifest.json
+```
+
+That URL is intended to stay constant. Each new stable tag release updates the manifest behind it so existing Jellyfin installs can see new plugin versions without changing the repository entry.
+
+For maintenance, the stable flow is just as simple: publish a normal tag like `v0.1.0`, and the workflow will update that fixed Jellyfin manifest URL automatically.
+
+Manual workflow dispatch remains for prereleases. Those prereleases keep their own version-specific release assets and do not replace the stable repository manifest.
+
+For release and development details, including the exact Jellyfin steps and manual install fallback, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Settings Page Helpers
 
 The plugin settings page now includes:
@@ -73,11 +93,11 @@ If you also want a Jellyfin repository manifest for direct install by manifest U
 .\build-release.ps1 -Configuration Release -Version v0.1.0 -ManifestSourceUrl https://github.com/<owner>/<repo>/releases/download/v0.1.0/Jellyfin.Plugin.Popfeed-v0.1.0.zip
 ```
 
-That also writes `artifacts/manifest.json`, which you can attach to the GitHub release and use as the custom repository URL in Jellyfin.
+That also writes `artifacts/manifest.json`, which you can attach to the GitHub release. For stable installs in Jellyfin, users should still use the fixed repository URL shown above rather than a version-specific release asset URL.
 
 The repository also includes a GitHub Actions workflow at `.github/workflows/release.yml` that builds and uploads the ZIP automatically for tags like `v0.1.0`.
 
-For tagged GitHub releases, the workflow now uploads both the plugin ZIP and a matching `manifest.json`, and it asks GitHub to generate release notes automatically.
+For tagged GitHub releases, the workflow uploads both the plugin ZIP and a matching `manifest.json`, and it asks GitHub to generate release notes automatically. The full release workflow, prerelease flow, and Jellyfin repository setup are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Build
 
