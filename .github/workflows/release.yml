@@ -9,8 +9,8 @@ on:
 jobs:
     build:
         runs-on: windows-latest
-    env:
-      PLUGIN_ASSET_NAME: Jellyfin.Plugin.Popfeed-${{ github.ref_name }}.zip
+        env:
+            PLUGIN_ASSET_NAME: Jellyfin.Plugin.Popfeed-${{ github.ref_name }}.zip
 
         steps:
             - name: Checkout
