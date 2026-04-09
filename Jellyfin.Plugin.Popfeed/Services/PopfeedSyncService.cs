@@ -17,6 +17,8 @@ namespace Jellyfin.Plugin.Popfeed.Services;
 /// </summary>
 public sealed class PopfeedSyncService
 {
+    private const string BlueskyPostCollection = "app.bsky.feed.post";
+    private const int BlueskyPostMaxLength = 300;
     private readonly SemaphoreSlim _syncLock = new(1, 1);
     private readonly PopfeedAtProtoClient _client;
     private readonly IPopfeedWatchStateWriter[] _watchStateWriters;
@@ -224,7 +226,10 @@ public sealed class PopfeedSyncService
         {
             result.Success = true;
             result.Executed = false;
-            result.Message = "Dry run successful. The item would be sent to Popfeed with the current configuration.";
+            result.PostedToBluesky = played && userConfiguration.PostWatchedItemsToBluesky;
+            result.Message = result.PostedToBluesky
+                ? "Dry run successful. The item would be sent to Popfeed and posted as Bluesky activity with the current configuration."
+                : "Dry run successful. The item would be sent to Popfeed with the current configuration.";
             LogVerbose("Dry run successful for {ItemName}. UserId={UserId}, Identifier={Identifier}", item.Name, jellyfinUserId, userConfiguration.Identifier);
             return CompleteResult(result, triggerSource);
         }
@@ -253,9 +258,24 @@ public sealed class PopfeedSyncService
                     configuration.RemoveFromWatchedListWhenUnplayed,
                     cancellationToken).ConfigureAwait(false);
 
+                if (played && userConfiguration.PostWatchedItemsToBluesky)
+                {
+                    var timestamp = playedAt ?? DateTimeOffset.UtcNow;
+                    var post = new BlueskyFeedPostRecord
+                    {
+                        Text = BuildWatchedActivityText(item),
+                        CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                    };
+
+                    await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
+                    result.PostedToBluesky = true;
+                }
+
                 result.Success = true;
                 result.Executed = true;
-                result.Message = "Remote sync completed successfully.";
+                result.Message = result.PostedToBluesky
+                    ? "Remote sync completed successfully and created a Bluesky activity post."
+                    : "Remote sync completed successfully.";
                 return CompleteResult(result, triggerSource);
             }
             catch (Exception ex)
@@ -277,6 +297,43 @@ public sealed class PopfeedSyncService
         result.TimestampUtc = DateTimeOffset.UtcNow;
         _statusStore.Add(result);
         return result;
+    }
+
+    private static string BuildWatchedActivityText(BaseItem item)
+    {
+        var summary = item switch
+        {
+            Episode episode when episode.Series is not null => $"watched {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)}",
+            Movie movie when movie.ProductionYear.HasValue => $"watched {movie.Name} ({movie.ProductionYear.Value})",
+            Movie movie => $"watched {movie.Name}",
+            _ => $"watched {item.Name}",
+        };
+
+        return TruncateBlueskyPost($"I {summary} on Jellyfin via Popfeed.");
+    }
+
+    private static string FormatEpisodeLabel(Episode episode)
+    {
+        var season = episode.ParentIndexNumber.HasValue ? $"S{episode.ParentIndexNumber.Value:00}" : "S?";
+        var episodeNumber = episode.IndexNumber.HasValue ? $"E{episode.IndexNumber.Value:00}" : "E?";
+        return season + episodeNumber;
+    }
+
+    private static string FormatEpisodeTitleSuffix(Episode episode)
+    {
+        return string.IsNullOrWhiteSpace(episode.Name) ? string.Empty : $" \"{episode.Name}\"";
+    }
+
+    private static string ToAtProtoDateTime(DateTime dateTime)
+    {
+        return dateTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string TruncateBlueskyPost(string text)
+    {
+        return text.Length <= BlueskyPostMaxLength
+            ? text
+            : text[..(BlueskyPostMaxLength - 3)] + "...";
     }
 
     private void LogVerbose(string message, params object?[] arguments)

@@ -43,6 +43,11 @@ public sealed class PopfeedUserConfiguration
     public string WatchedListUri { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets a value indicating whether watched items should also be posted as activity to Bluesky.
+    /// </summary>
+    public bool PostWatchedItemsToBluesky { get; set; }
+
+    /// <summary>
     /// Determines whether the mapping has enough information to sync.
     /// </summary>
     /// <returns><see langword="true"/> when the mapping is valid.</returns>

@@ -154,4 +154,9 @@ public sealed class PopfeedSyncTestResult
     /// Gets or sets the mapped identifiers.
     /// </summary>
     public PopfeedIdentifiers? Identifiers { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the sync also created a Bluesky activity post.
+    /// </summary>
+    public bool PostedToBluesky { get; set; }
 }

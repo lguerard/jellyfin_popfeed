@@ -170,6 +170,28 @@ public sealed class PopfeedListItemRecord
 }
 
 /// <summary>
+/// Standard Bluesky feed post record.
+/// </summary>
+public sealed class BlueskyFeedPostRecord
+{
+    /// <summary>
+    /// Gets or sets the type discriminator.
+    /// </summary>
+    [JsonPropertyName("$type")]
+    public string Type { get; set; } = "app.bsky.feed.post";
+
+    /// <summary>
+    /// Gets or sets the post text.
+    /// </summary>
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the creation timestamp.
+    /// </summary>
+    public string CreatedAt { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// External identifiers for Popfeed records.
 /// </summary>
 public sealed class PopfeedIdentifiers
