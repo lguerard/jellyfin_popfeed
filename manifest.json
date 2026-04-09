@@ -8,12 +8,12 @@
     "category": "General",
     "versions": [
       {
-        "version": "0.2.5.0",
+        "version": "0.2.6.0",
         "changelog": "- Initial Popfeed sync plugin release\r\n- Added per-user Popfeed mappings\r\n- Added searchable exclusion UI and dry-run test endpoint\r\n- Added recent sync activity panel in the plugin settings page\r\n- Added GitHub-release manifest generation for direct Jellyfin repository install",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.2.5/Jellyfin.Plugin.Popfeed-v0.2.5.zip",
-        "checksum": "667b1eeb365c4fd47a5f3635a410c88a",
-        "timestamp": "2026-04-09T08:54:13.5901176Z"
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.2.6/Jellyfin.Plugin.Popfeed-v0.2.6.zip",
+        "checksum": "bfc2618eebbf419050e47bbad8dc52b0",
+        "timestamp": "2026-04-09T09:13:06.3798803Z"
       }
     ],
     "imageUrl": "https://raw.githubusercontent.com/lguerard/jellyfin_popfeed/main/assets/jellyfin-plugin-popfeed.svg"
