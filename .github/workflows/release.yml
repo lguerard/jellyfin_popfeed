@@ -50,6 +50,24 @@ jobs:
                                             throw 'artifacts/manifest.json must have an array at the root for Jellyfin custom repositories.'
                                     }
 
+                        - name: Validate packaged plugin files
+                          shell: pwsh
+                          run: |
+                              $ErrorActionPreference = 'Stop'
+                              Add-Type -AssemblyName System.IO.Compression.FileSystem
+                              $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path "artifacts/${{ env.PLUGIN_ASSET_NAME }}"))
+                              try {
+                                  $entries = $zip.Entries.FullName
+                                  foreach ($requiredEntry in @('Jellyfin.Plugin.Popfeed.dll', 'Jellyfin.Plugin.Popfeed.deps.json')) {
+                                      if ($entries -notcontains $requiredEntry) {
+                                          throw "Release ZIP is missing required file: $requiredEntry"
+                                      }
+                                  }
+                              }
+                              finally {
+                                  $zip.Dispose()
+                              }
+
             - name: Upload artifact
               uses: actions/upload-artifact@v6
               with:
