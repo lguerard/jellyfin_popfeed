@@ -77,6 +77,8 @@ To generate a Jellyfin repository manifest alongside the ZIP, pass the future re
 
 That also writes `artifacts/manifest.json`.
 
+Before publishing it, verify that the file starts with `[` and therefore contains a JSON array at the root. Jellyfin custom repositories skip manifests that serialize as a single object instead of an array.
+
 The manifest metadata is derived from `build.yaml`, and the generated version entry contains:
 
 - the normalized plugin version
@@ -100,6 +102,16 @@ The workflow will:
 2. Generate `artifacts/manifest.json` pointing at the release ZIP URL for that tag.
 3. Upload both files to the GitHub release.
 4. Update the stable repository manifest at `https://raw.githubusercontent.com/lguerard/jellyfin_popfeed/release-manifest/manifest.json`.
+
+If users report that the plugin does not appear in Jellyfin after adding the repository URL, check the published manifest URL directly first. The common failure mode is a manifest with the wrong JSON root shape.
+
+Quick verification:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/lguerard/jellyfin_popfeed/release-manifest/manifest.json | Select-Object -ExpandProperty Content
+```
+
+The response must be valid JSON whose root value is an array, and the `sourceUrl` inside it must point to an existing release ZIP.
 
 This is the low-maintenance release path and should be the default way to publish user-facing updates.
 
