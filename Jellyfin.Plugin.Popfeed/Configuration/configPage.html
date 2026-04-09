@@ -135,7 +135,9 @@
               <h2>Per-User Popfeed Accounts</h2>
               <div class="fieldDescription">
                 Add one row per Jellyfin user you want to sync. Each row maps
-                one Jellyfin user to one Popfeed ATProto account.
+                one Jellyfin user to one Popfeed ATProto account. Enable Bluesky
+                activity posting on a mapping if you want watched items to
+                appear as account activity in Popfeed and on Bluesky.
               </div>
               <div id="PopfeedUserMappings"></div>
               <div class="popfeedActions">
@@ -479,6 +481,12 @@
             "text",
             mapping.WatchedListName || "Watched",
           );
+          var postToBluesky = createInput(
+            "Auto Post Watched Items To Bluesky",
+            "mapping-post-to-bluesky",
+            "checkbox",
+            !!mapping.PostWatchedItemsToBluesky,
+          );
           var enabled = createInput(
             "Enabled",
             "mapping-enabled",
@@ -490,6 +498,7 @@
           grid.appendChild(password.container);
           grid.appendChild(pds.container);
           grid.appendChild(listName.container);
+          grid.appendChild(postToBluesky.container);
           grid.appendChild(enabled.container);
           row.appendChild(grid);
 
@@ -527,6 +536,9 @@
                 PdsUrl: row.querySelector(".mapping-pds-url").value,
                 WatchedListName: row.querySelector(".mapping-watched-list-name")
                   .value,
+                PostWatchedItemsToBluesky: row.querySelector(
+                  ".mapping-post-to-bluesky",
+                ).checked,
                 Enabled: row.querySelector(".mapping-enabled").checked,
                 WatchedListUri: row.querySelector(".mapping-watched-list-uri")
                   .value,
@@ -699,7 +711,8 @@
               " | " +
               (entry.Played ? "watched" : "unwatched") +
               " | " +
-              (entry.Executed ? "remote write" : "no remote write");
+              (entry.Executed ? "remote write" : "no remote write") +
+              (entry.PostedToBluesky ? " | Bluesky post" : "");
             card.appendChild(summary);
 
             var message = document.createElement("div");
@@ -794,6 +807,7 @@
                   Enabled: true,
                   PdsUrl: "https://bsky.social",
                   WatchedListName: "Watched",
+                  PostWatchedItemsToBluesky: false,
                 });
               }
 
@@ -814,6 +828,7 @@
               Enabled: true,
               PdsUrl: "https://bsky.social",
               WatchedListName: "Watched",
+              PostWatchedItemsToBluesky: false,
             });
           });
 
