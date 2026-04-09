@@ -12,6 +12,8 @@ $artifactsRoot = Join-Path $PSScriptRoot "artifacts"
 $publishRoot = Join-Path $artifactsRoot "publish"
 $packageRoot = Join-Path $artifactsRoot "package\Popfeed"
 $zipPath = Join-Path $artifactsRoot ("Jellyfin.Plugin.Popfeed-{0}.zip" -f $Version)
+$buildYamlPath = Join-Path $PSScriptRoot "build.yaml"
+$buildYamlLines = Get-Content $buildYamlPath
 
 function Get-NormalizedAssemblyVersion {
     param([string]$RawVersion)
@@ -32,6 +34,98 @@ function Get-NormalizedAssemblyVersion {
     }
 
     return ($parts[0..3] -join '.')
+}
+
+function Find-BuildScalarValue {
+    param([string]$Key)
+
+    foreach ($line in $buildYamlLines) {
+        if ($line -match "^{0}:\s*(.+?)\s*$" -f [regex]::Escape($Key)) {
+            $value = $Matches[1].Trim()
+            if ($value -in @('|', '|-', '>', '>-')) {
+                return $null
+            }
+
+            return $value.Trim('"')
+        }
+    }
+
+    return $null
+}
+
+function Get-BuildScalarValue {
+    param([string]$Key)
+
+    $value = Find-BuildScalarValue -Key $Key
+    if ($null -ne $value) {
+        return $value
+    }
+
+    throw "Missing key '$Key' in build.yaml."
+}
+
+function Get-BuildBlockValue {
+    param([string]$Key)
+
+    for ($index = 0; $index -lt $buildYamlLines.Count; $index++) {
+        if ($buildYamlLines[$index] -match "^{0}:\s*(.+?)\s*$" -f [regex]::Escape($Key)) {
+            $value = $Matches[1].Trim()
+            if ($value -notin @('|', '|-', '>', '>-')) {
+                return $value.Trim('"')
+            }
+
+            $blockLines = @()
+            for ($innerIndex = $index + 1; $innerIndex -lt $buildYamlLines.Count; $innerIndex++) {
+                $candidate = $buildYamlLines[$innerIndex]
+                if ($candidate -match '^\s{2,}(.*)$') {
+                    $blockLines += $Matches[1]
+                    continue
+                }
+
+                if ([string]::IsNullOrWhiteSpace($candidate)) {
+                    $blockLines += ""
+                    continue
+                }
+
+                break
+            }
+
+            return ($blockLines -join [Environment]::NewLine).TrimEnd()
+        }
+    }
+
+    throw "Missing block '$Key' in build.yaml."
+}
+
+function Get-BuildArtifacts {
+    $artifacts = @()
+    $inArtifacts = $false
+
+    foreach ($line in $buildYamlLines) {
+        if ($line -match '^artifacts:\s*$') {
+            $inArtifacts = $true
+            continue
+        }
+
+        if (-not $inArtifacts) {
+            continue
+        }
+
+        if ($line -match '^\s*-\s*"?([^"\r\n]+)"?\s*$') {
+            $artifacts += $Matches[1]
+            continue
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            break
+        }
+    }
+
+    if ($artifacts.Count -eq 0) {
+        throw 'No artifacts were defined in build.yaml.'
+    }
+
+    return $artifacts
 }
 
 $normalizedAssemblyVersion = Get-NormalizedAssemblyVersion -RawVersion $Version
@@ -61,9 +155,30 @@ New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 
 dotnet publish $projectPath -c $Configuration -o $publishRoot -p:Version=$normalizedAssemblyVersion -p:AssemblyVersion=$normalizedAssemblyVersion -p:FileVersion=$normalizedAssemblyVersion -p:InformationalVersion=$informationalVersion
 
-Copy-Item (Join-Path $publishRoot "*") $packageRoot -Recurse
+$packageFiles = Get-BuildArtifacts
+foreach ($packageFile in $packageFiles) {
+    Copy-Item (Join-Path $publishRoot $packageFile) $packageRoot
+}
 
-Copy-Item (Join-Path $PSScriptRoot "README.md") (Join-Path $packageRoot "README.md")
+$pluginMeta = [ordered]@{
+    category = Get-BuildScalarValue -Key 'category'
+    changelog = Get-BuildBlockValue -Key 'changelog'
+    description = Get-BuildBlockValue -Key 'description'
+    guid = Get-BuildScalarValue -Key 'guid'
+    name = Get-BuildScalarValue -Key 'name'
+    overview = Get-BuildScalarValue -Key 'overview'
+    owner = Get-BuildScalarValue -Key 'owner'
+    targetAbi = Get-BuildScalarValue -Key 'targetAbi'
+    timestamp = (Get-Date).ToUniversalTime().ToString('o')
+    version = $normalizedAssemblyVersion
+}
+
+$imageUrl = Find-BuildScalarValue -Key 'imageUrl'
+if (-not [string]::IsNullOrWhiteSpace($imageUrl)) {
+    $pluginMeta.imageUrl = $imageUrl
+}
+
+ConvertTo-Json -InputObject $pluginMeta -Depth 4 | Set-Content -Path (Join-Path $packageRoot 'meta.json') -Encoding UTF8
 
 Compress-Archive -Path (Join-Path $packageRoot "*") -DestinationPath $zipPath
 
