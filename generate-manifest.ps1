@@ -110,5 +110,5 @@ if ($manifestDirectory -and -not (Test-Path $manifestDirectory)) {
     New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
 }
 
-$manifest | ConvertTo-Json -Depth 6 | Set-Content -Path $OutputPath -Encoding UTF8
+ConvertTo-Json -InputObject $manifest -Depth 6 | Set-Content -Path $OutputPath -Encoding UTF8
 Write-Host "Created manifest: $OutputPath"
