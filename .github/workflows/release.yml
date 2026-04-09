@@ -102,6 +102,46 @@ jobs:
               run: |
                   $ErrorActionPreference = 'Stop'
 
+                  function Read-ManifestEntries {
+                      param([string]$Path)
+
+                      if (-not (Test-Path $Path)) {
+                          return @()
+                      }
+
+                      $json = Get-Content $Path -Raw
+                      $document = [System.Text.Json.JsonDocument]::Parse($json)
+
+                      if ($document.RootElement.ValueKind -eq [System.Text.Json.JsonValueKind]::Array) {
+                          return @(ConvertFrom-Json -InputObject $json -NoEnumerate)
+                      }
+
+                      if ($document.RootElement.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
+                          return @((ConvertFrom-Json -InputObject $json))
+                      }
+
+                      throw "Manifest at $Path must have an object or array root."
+                  }
+
+                  function Sort-VersionEntries {
+                      param([object[]]$Entries)
+
+                      return @(
+                          $Entries |
+                              Sort-Object -Descending -Property @(
+                                  @{ Expression = {
+                                          try {
+                                              [version]$_.version
+                                          }
+                                          catch {
+                                              [version]'0.0.0.0'
+                                          }
+                                      }
+                                  },
+                                  @{ Expression = { $_.timestamp } })
+                      )
+                  }
+
                   $manifestBranch = $env:STABLE_MANIFEST_BRANCH
                   $tempDir = Join-Path $env:RUNNER_TEMP 'stable-manifest'
                   $repoUrl = "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
@@ -119,7 +159,36 @@ jobs:
                       Pop-Location
                   }
 
-                  Copy-Item artifacts/manifest.json (Join-Path $tempDir 'manifest.json') -Force
+                  $stableManifestPath = Join-Path $tempDir 'manifest.json'
+                  $incomingEntries = Read-ManifestEntries -Path 'artifacts/manifest.json'
+                  $existingEntries = Read-ManifestEntries -Path $stableManifestPath
+
+                  foreach ($incomingEntry in $incomingEntries) {
+                      $existingEntry = $existingEntries | Where-Object { $_.guid -eq $incomingEntry.guid } | Select-Object -First 1
+
+                      if ($null -eq $existingEntry) {
+                          $incomingEntry.versions = Sort-VersionEntries -Entries @($incomingEntry.versions)
+                          $existingEntries += $incomingEntry
+                          continue
+                      }
+
+                      foreach ($property in @('name', 'description', 'overview', 'owner', 'category', 'imageUrl')) {
+                          if ($incomingEntry.PSObject.Properties.Name -contains $property) {
+                              $existingEntry.$property = $incomingEntry.$property
+                          }
+                      }
+
+                      $existingVersions = @($existingEntry.versions)
+                      $incomingVersions = @($incomingEntry.versions)
+                      $incomingVersionNumbers = @($incomingVersions | ForEach-Object { $_.version })
+
+                      $mergedVersions = @($incomingVersions)
+                      $mergedVersions += @($existingVersions | Where-Object { $incomingVersionNumbers -notcontains $_.version })
+                      $existingEntry.versions = Sort-VersionEntries -Entries $mergedVersions
+                  }
+
+                  $manifestJson = ConvertTo-Json -InputObject @($existingEntries) -Depth 12
+                  Set-Content -Path $stableManifestPath -Value $manifestJson -Encoding UTF8
 
                   Push-Location $tempDir
                   git config user.name 'github-actions[bot]'
