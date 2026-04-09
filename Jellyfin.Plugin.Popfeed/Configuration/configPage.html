@@ -341,35 +341,34 @@
           excludedItems: [],
         };
 
-        function apiGet(path) {
-          return fetch(ApiClient.getUrl(path)).then(function (response) {
-            if (!response.ok) {
-              throw new Error("Request failed: " + response.status);
-            }
-            return response.json();
+        function apiRequest(path, method, payload) {
+          var request = {
+            url: ApiClient.getUrl(path),
+            type: method,
+            dataType: "json",
+            headers: {
+              accept: "application/json",
+            },
+          };
+
+          if (payload !== undefined) {
+            request.contentType = "application/json; charset=utf-8";
+            request.data = JSON.stringify(payload);
+          }
+
+          return ApiClient.fetch(request).catch(function (error) {
+            var message =
+              (error && (error.message || error.statusText)) || String(error);
+            throw new Error(message);
           });
         }
 
+        function apiGet(path) {
+          return apiRequest(path, "GET");
+        }
+
         function apiPost(path, payload) {
-          return fetch(ApiClient.getUrl(path), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-          }).then(function (response) {
-            if (!response.ok) {
-              return response
-                .json()
-                .then(function (body) {
-                  throw new Error(body.message || JSON.stringify(body));
-                })
-                .catch(function () {
-                  throw new Error("Request failed: " + response.status);
-                });
-            }
-            return response.json();
-          });
+          return apiRequest(path, "POST", payload);
         }
 
         function setSelectOptions(select, users, includeBlank, blankLabel) {
@@ -387,6 +386,12 @@
             option.textContent = user.Name + " (" + user.Id + ")";
             select.appendChild(option);
           });
+
+          if (!select.value && users.length && !includeBlank) {
+            select.value = users[0].Id;
+          }
+
+          select.dispatchEvent(new Event("change", { bubbles: true }));
         }
 
         function createInput(labelText, className, type, value) {
@@ -443,6 +448,9 @@
             "emby-select-withcolor emby-select mapping-user-id";
           setSelectOptions(userSelect, PopfeedConfig.users, false);
           userSelect.value = mapping.JellyfinUserId || "";
+          if (!userSelect.value && PopfeedConfig.users.length) {
+            userSelect.value = PopfeedConfig.users[0].Id;
+          }
           userContainer.appendChild(userLabel);
           userContainer.appendChild(userSelect);
           grid.appendChild(userContainer);
