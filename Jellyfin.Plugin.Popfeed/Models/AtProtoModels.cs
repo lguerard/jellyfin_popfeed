@@ -170,6 +170,63 @@ public sealed class PopfeedListItemRecord
 }
 
 /// <summary>
+/// Popfeed review/activity record.
+/// </summary>
+public sealed class PopfeedReviewRecord
+{
+    /// <summary>
+    /// Gets or sets the type discriminator.
+    /// </summary>
+    [JsonPropertyName("$type")]
+    public string Type { get; set; } = "social.popfeed.feed.review";
+
+    /// <summary>
+    /// Gets or sets the title.
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the activity text.
+    /// </summary>
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the identifiers.
+    /// </summary>
+    public PopfeedIdentifiers Identifiers { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets the creative work type.
+    /// </summary>
+    public string CreativeWorkType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the creation timestamp.
+    /// </summary>
+    public string CreatedAt { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets record tags.
+    /// </summary>
+    public List<string> Tags { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the ATProto facets.
+    /// </summary>
+    public List<object> Facets { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the record contains spoilers.
+    /// </summary>
+    public bool ContainsSpoilers { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this is a revisit.
+    /// </summary>
+    public bool IsRevisit { get; set; }
+}
+
+/// <summary>
 /// Standard Bluesky feed post record.
 /// </summary>
 public sealed class BlueskyFeedPostRecord

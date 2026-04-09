@@ -221,15 +221,15 @@ public sealed class PopfeedSyncService
         result.CreativeWorkType = mapped.CreativeWorkType;
         result.Identifiers = mapped.Identifiers;
         result.WouldSync = true;
+        var activityText = BuildWatchedActivityText(item);
 
         if (!executeRemote)
         {
             result.Success = true;
             result.Executed = false;
+            result.CreatedPopfeedActivity = played;
             result.PostedToBluesky = played && userConfiguration.PostWatchedItemsToBluesky;
-            result.Message = result.PostedToBluesky
-                ? "Dry run successful. The item would be sent to Popfeed and posted as Bluesky activity with the current configuration."
-                : "Dry run successful. The item would be sent to Popfeed with the current configuration.";
+            result.Message = BuildDryRunMessage(played, result.PostedToBluesky);
             LogVerbose("Dry run successful for {ItemName}. UserId={UserId}, Identifier={Identifier}", item.Name, jellyfinUserId, userConfiguration.Identifier);
             return CompleteResult(result, triggerSource);
         }
@@ -253,29 +253,42 @@ public sealed class PopfeedSyncService
                     session,
                     mapped,
                     item.Name,
+                    activityText,
+                    item,
                     played,
                     playedAt,
                     configuration.RemoveFromWatchedListWhenUnplayed,
                     cancellationToken).ConfigureAwait(false);
 
+                result.CreatedPopfeedActivity = played;
+
                 if (played && userConfiguration.PostWatchedItemsToBluesky)
                 {
-                    var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-                    var post = new BlueskyFeedPostRecord
+                    try
                     {
-                        Text = BuildWatchedActivityText(item),
-                        CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
-                    };
+                        var timestamp = playedAt ?? DateTimeOffset.UtcNow;
+                        var post = new BlueskyFeedPostRecord
+                        {
+                            Text = activityText,
+                            CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                        };
 
-                    await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
-                    result.PostedToBluesky = true;
+                        await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
+                        result.PostedToBluesky = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Created Popfeed activity for {ItemName}, but failed to create the Bluesky post for user {UserId}.", item.Name, jellyfinUserId);
+                        result.Success = false;
+                        result.Executed = true;
+                        result.Message = "Popfeed activity was created, but the Bluesky post failed: " + ex.Message;
+                        return CompleteResult(result, triggerSource);
+                    }
                 }
 
                 result.Success = true;
                 result.Executed = true;
-                result.Message = result.PostedToBluesky
-                    ? "Remote sync completed successfully and created a Bluesky activity post."
-                    : "Remote sync completed successfully.";
+                result.Message = BuildSuccessMessage(played, result.PostedToBluesky);
                 return CompleteResult(result, triggerSource);
             }
             catch (Exception ex)
@@ -297,6 +310,30 @@ public sealed class PopfeedSyncService
         result.TimestampUtc = DateTimeOffset.UtcNow;
         _statusStore.Add(result);
         return result;
+    }
+
+    private static string BuildDryRunMessage(bool played, bool postToBluesky)
+    {
+        if (!played)
+        {
+            return "Dry run successful. Matching Popfeed activity would be removed when a plugin-created record exists.";
+        }
+
+        return postToBluesky
+            ? "Dry run successful. The item would be posted as Popfeed activity and cross-posted to Bluesky."
+            : "Dry run successful. The item would be posted as Popfeed activity.";
+    }
+
+    private static string BuildSuccessMessage(bool played, bool postedToBluesky)
+    {
+        if (!played)
+        {
+            return "Remote sync completed successfully. Matching Popfeed activity was removed when present.";
+        }
+
+        return postedToBluesky
+            ? "Remote sync completed successfully. Created Popfeed activity and a Bluesky post."
+            : "Remote sync completed successfully. Created Popfeed activity.";
     }
 
     private static string BuildWatchedActivityText(BaseItem item)

@@ -5,17 +5,17 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Popfeed.Configuration;
 using Jellyfin.Plugin.Popfeed.Models;
+using MediaBrowser.Controller.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Popfeed.Services;
 
 /// <summary>
-/// Stores watched state as Popfeed list items in a watched list.
+/// Stores watched state as native Popfeed activity records.
 /// </summary>
 public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 {
-    private const string ListCollection = "social.popfeed.feed.list";
-    private const string ListItemCollection = "social.popfeed.feed.listItem";
+    private const string ReviewCollection = "social.popfeed.feed.review";
     private readonly PopfeedAtProtoClient _client;
     private readonly ILogger<PopfeedWatchedListWriter> _logger;
 
@@ -39,36 +39,40 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         AtProtoSessionResponse session,
         PopfeedMappedItem mappedItem,
         string title,
+        string activityText,
+        BaseItem item,
         bool played,
         DateTimeOffset? playedAt,
         bool removeWhenUnplayed,
         CancellationToken cancellationToken)
     {
-        LogVerbose("Using watched-list strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
-        var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
-        var existingRecord = await FindExistingListItemAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
+        LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
+        var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, activityText, cancellationToken).ConfigureAwait(false);
 
         if (played)
         {
             if (existingRecord is not null)
             {
-                LogVerbose("Skipping create for {ItemName}: matching watched list item already exists.", title);
+                LogVerbose("Skipping create for {ItemName}: matching Popfeed activity already exists.", title);
                 return;
             }
 
             var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-            var record = new PopfeedListItemRecord
+            var record = new PopfeedReviewRecord
             {
+                Title = BuildActivityTitle(item, title),
+                Text = activityText,
                 Identifiers = mappedItem.Identifiers,
                 CreativeWorkType = mappedItem.CreativeWorkType,
-                ListUri = watchedListUri,
-                AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
-                CompletedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
-                Title = title,
+                CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                Tags = ["jellyfin", "watched"],
+                Facets = [],
+                ContainsSpoilers = false,
+                IsRevisit = false,
             };
 
-            await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, record, cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Synced watched state for {ItemName} to Popfeed account {Identifier}.", title, userConfiguration.Identifier);
+            await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ReviewCollection, record, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Created Popfeed activity for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
             return;
         }
 
@@ -79,69 +83,28 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         }
 
         var rkey = GetRecordKey(existingRecord.Uri);
-        await _client.DeleteRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, rkey, cancellationToken).ConfigureAwait(false);
-        _logger.LogInformation("Removed watched state for {ItemName} from Popfeed account {Identifier}.", title, userConfiguration.Identifier);
+        await _client.DeleteRecordAsync(userConfiguration.PdsUrl, session, ReviewCollection, rkey, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Removed Popfeed activity for {ItemName} from account {Identifier}.", title, userConfiguration.Identifier);
     }
 
-    private async Task<string> EnsureWatchedListAsync(PopfeedUserConfiguration userConfiguration, AtProtoSessionResponse session, CancellationToken cancellationToken)
-    {
-        if (!string.IsNullOrWhiteSpace(userConfiguration.WatchedListUri))
-        {
-            LogVerbose("Using cached watched list URI for account {Identifier}: {WatchedListUri}", userConfiguration.Identifier, userConfiguration.WatchedListUri);
-            return userConfiguration.WatchedListUri;
-        }
-
-        var listName = string.IsNullOrWhiteSpace(userConfiguration.WatchedListName) ? "Watched" : userConfiguration.WatchedListName;
-        string? cursor = null;
-        do
-        {
-            var page = await _client.ListRecordsAsync<PopfeedListRecord>(userConfiguration.PdsUrl, session, ListCollection, cursor, cancellationToken).ConfigureAwait(false);
-            var existing = page.Records.FirstOrDefault(record => string.Equals(record.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null)
-            {
-                userConfiguration.WatchedListUri = existing.Uri;
-                Plugin.Instance.SaveConfiguration();
-                LogVerbose("Found existing watched list {ListName} for account {Identifier}: {WatchedListUri}", listName, userConfiguration.Identifier, existing.Uri);
-                return existing.Uri;
-            }
-
-            cursor = page.Cursor;
-        }
-        while (!string.IsNullOrWhiteSpace(cursor));
-
-        var newRecord = new PopfeedListRecord
-        {
-            Name = listName,
-            Description = "Created by Jellyfin Popfeed plugin to mirror watched history.",
-            CreatedAt = ToAtProtoDateTime(DateTime.UtcNow),
-            Ordered = false,
-        };
-
-        var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListCollection, newRecord, cancellationToken).ConfigureAwait(false);
-        userConfiguration.WatchedListUri = created.Uri;
-        Plugin.Instance.SaveConfiguration();
-        LogVerbose("Created watched list {ListName} for account {Identifier}: {WatchedListUri}", listName, userConfiguration.Identifier, created.Uri);
-        return created.Uri;
-    }
-
-    private async Task<AtProtoRecord<PopfeedListItemRecord>?> FindExistingListItemAsync(
+    private async Task<AtProtoRecord<PopfeedReviewRecord>?> FindExistingActivityAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
-        string watchedListUri,
         PopfeedIdentifiers identifiers,
+        string activityText,
         CancellationToken cancellationToken)
     {
         string? cursor = null;
         do
         {
-            var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(userConfiguration.PdsUrl, session, ListItemCollection, cursor, cancellationToken).ConfigureAwait(false);
+            var page = await _client.ListRecordsAsync<PopfeedReviewRecord>(userConfiguration.PdsUrl, session, ReviewCollection, cursor, cancellationToken).ConfigureAwait(false);
             var match = page.Records.FirstOrDefault(record =>
-                string.Equals(record.Value.ListUri, watchedListUri, StringComparison.Ordinal)
-                && record.Value.Identifiers.Matches(identifiers));
+                record.Value.Identifiers.Matches(identifiers)
+                && string.Equals(record.Value.Text, activityText, StringComparison.Ordinal));
 
             if (match is not null)
             {
-                LogVerbose("Found matching watched list item for identifiers in list {WatchedListUri}.", watchedListUri);
+                LogVerbose("Found existing Popfeed activity for identifiers on account {Identifier}.", userConfiguration.Identifier);
                 return match;
             }
 
@@ -150,6 +113,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         while (!string.IsNullOrWhiteSpace(cursor));
 
         return null;
+    }
+
+    private static string BuildActivityTitle(BaseItem item, string fallbackTitle)
+    {
+        return item is MediaBrowser.Controller.Entities.TV.Episode episode && episode.Series is not null
+            ? episode.Series.Name + " - " + fallbackTitle
+            : fallbackTitle;
     }
 
     private static string ToAtProtoDateTime(DateTime dateTime)

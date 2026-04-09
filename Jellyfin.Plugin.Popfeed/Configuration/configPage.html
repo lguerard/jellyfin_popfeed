@@ -76,7 +76,7 @@
             <div class="popfeedSection">
               <div class="selectContainer">
                 <label class="selectLabel" for="WatchStateProvider"
-                  >Watch State Strategy</label
+                  >Popfeed Sync Mode</label
                 >
                 <select
                   is="emby-select"
@@ -84,13 +84,13 @@
                   class="emby-select-withcolor emby-select"
                 >
                   <option value="popfeed-watched-list">
-                    Popfeed watched list items
+                    Native Popfeed activity records
                   </option>
                 </select>
                 <div class="fieldDescription">
-                  This version stores watched state in a Popfeed list because
-                  Popfeed does not currently expose a dedicated watched-history
-                  record.
+                  Watched items are posted as native Popfeed activity by
+                  default. The Bluesky checkbox below only controls whether the
+                  same event is also cross-posted to Bluesky.
                 </div>
               </div>
 
@@ -135,9 +135,9 @@
               <h2>Per-User Popfeed Accounts</h2>
               <div class="fieldDescription">
                 Add one row per Jellyfin user you want to sync. Each row maps
-                one Jellyfin user to one Popfeed ATProto account. Enable Bluesky
-                activity posting on a mapping if you want watched items to
-                appear as account activity in Popfeed and on Bluesky.
+                one Jellyfin user to one Popfeed ATProto account. Watched events
+                create Popfeed activity by default. Enable the Bluesky checkbox
+                only if you also want a separate Bluesky post.
               </div>
               <div id="PopfeedUserMappings"></div>
               <div class="popfeedActions">
@@ -475,14 +475,8 @@
             "text",
             mapping.PdsUrl || "https://bsky.social",
           );
-          var listName = createInput(
-            "Watched List Name",
-            "mapping-watched-list-name",
-            "text",
-            mapping.WatchedListName || "Watched",
-          );
           var postToBluesky = createInput(
-            "Auto Post Watched Items To Bluesky",
+            "Also Post Watched Items To Bluesky",
             "mapping-post-to-bluesky",
             "checkbox",
             !!mapping.PostWatchedItemsToBluesky,
@@ -497,10 +491,15 @@
           grid.appendChild(identifier.container);
           grid.appendChild(password.container);
           grid.appendChild(pds.container);
-          grid.appendChild(listName.container);
           grid.appendChild(postToBluesky.container);
           grid.appendChild(enabled.container);
           row.appendChild(grid);
+
+          var watchedListName = document.createElement("input");
+          watchedListName.type = "hidden";
+          watchedListName.className = "mapping-watched-list-name";
+          watchedListName.value = mapping.WatchedListName || "Watched";
+          row.appendChild(watchedListName);
 
           var watchedListUri = document.createElement("input");
           watchedListUri.type = "hidden";
@@ -712,6 +711,7 @@
               (entry.Played ? "watched" : "unwatched") +
               " | " +
               (entry.Executed ? "remote write" : "no remote write") +
+              (entry.CreatedPopfeedActivity ? " | Popfeed activity" : "") +
               (entry.PostedToBluesky ? " | Bluesky post" : "");
             card.appendChild(summary);
 

@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Popfeed.Configuration;
 using Jellyfin.Plugin.Popfeed.Models;
+using MediaBrowser.Controller.Entities;
 
 namespace Jellyfin.Plugin.Popfeed.Services;
 
@@ -33,6 +34,8 @@ public interface IPopfeedWatchStateWriter
         AtProtoSessionResponse session,
         PopfeedMappedItem mappedItem,
         string title,
+        string activityText,
+        BaseItem item,
         bool played,
         DateTimeOffset? playedAt,
         bool removeWhenUnplayed,

@@ -156,6 +156,11 @@ public sealed class PopfeedSyncTestResult
     public PopfeedIdentifiers? Identifiers { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the sync created a native Popfeed activity record.
+    /// </summary>
+    public bool CreatedPopfeedActivity { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the sync also created a Bluesky activity post.
     /// </summary>
     public bool PostedToBluesky { get; set; }

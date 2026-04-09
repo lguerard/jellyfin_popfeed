@@ -2,18 +2,17 @@
 
 This plugin pushes Jellyfin watched and unwatched actions to Popfeed over ATProto.
 
-It now supports separate Popfeed credentials per Jellyfin user and routes watch-state writes through a strategy interface so the current list-item approach can be replaced when Popfeed ships a dedicated watched-history lexicon.
+It supports separate Popfeed credentials per Jellyfin user and posts watched items as native Popfeed activity records. It can also create an additional Bluesky post for the same watched event when enabled per user.
 
 It also supports an exclusion list of Jellyfin item ids so specific movies or full series can be hidden from automatic Popfeed sync.
 
 ## Current mapping
 
-Popfeed does not currently expose a dedicated watched-history record comparable to Trakt history. This plugin therefore models watched state by:
+This plugin models Jellyfin watch activity by:
 
-- creating or reusing a `social.popfeed.feed.list` record named `Watched`
-- creating `social.popfeed.feed.listItem` records in that list
-- setting list item `status` to `#finished`
-- deleting the matching list item when a title is marked unwatched, if enabled
+- creating `social.popfeed.feed.review` records as native Popfeed activity when a title is marked watched
+- deleting the matching plugin-created activity record when a title is marked unwatched, if enabled
+- optionally creating an additional `app.bsky.feed.post` record when the per-user Bluesky checkbox is enabled
 
 ## Supported media
 
@@ -33,7 +32,7 @@ Each mapping can include:
 - `Identifier`
 - `AppPassword`
 - `PdsUrl` (optional, defaults to `https://bsky.social`)
-- `WatchedListName` (optional, defaults to `Watched`)
+- `PostWatchedItemsToBluesky` (optional)
 - `Enabled` (optional)
 
 You can also configure exclusions directly from the settings page by searching for items and adding them to the excluded list.

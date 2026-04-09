@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using Jellyfin.Plugin.Popfeed.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
@@ -23,6 +24,8 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        EnsureConfigurationDefaults();
+        TryDeleteStalePluginDirectories();
     }
 
     /// <summary>
@@ -38,6 +41,61 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     /// <inheritdoc />
     public override Guid Id => Guid.Parse("14af54bf-b9d9-4c8a-8c16-a8e993f8ec08");
+
+    private void EnsureConfigurationDefaults()
+    {
+        if (string.IsNullOrWhiteSpace(Configuration.WatchStateProvider))
+        {
+            Configuration.WatchStateProvider = PluginConfiguration.PopfeedWatchedListProviderName;
+            SaveConfiguration();
+        }
+    }
+
+    private void TryDeleteStalePluginDirectories()
+    {
+        try
+        {
+            var currentDirectory = Path.GetDirectoryName(GetType().Assembly.Location);
+            if (string.IsNullOrWhiteSpace(currentDirectory))
+            {
+                return;
+            }
+
+            var pluginsRoot = Directory.GetParent(currentDirectory);
+            if (pluginsRoot is null)
+            {
+                return;
+            }
+
+            foreach (var directory in pluginsRoot.EnumerateDirectories("Popfeed_*"))
+            {
+                if (string.Equals(directory.FullName, currentDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    directory.Delete(true);
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (DirectoryNotFoundException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
 
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
