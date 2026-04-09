@@ -173,9 +173,16 @@ jobs:
                       }
 
                       foreach ($property in @('name', 'description', 'overview', 'owner', 'category', 'imageUrl')) {
-                          if ($incomingEntry.PSObject.Properties.Name -contains $property) {
-                              $existingEntry.$property = $incomingEntry.$property
+                          if ($incomingEntry.PSObject.Properties.Name -notcontains $property) {
+                              continue
                           }
+
+                          if ($existingEntry.PSObject.Properties.Name -contains $property) {
+                              $existingEntry.$property = $incomingEntry.$property
+                              continue
+                          }
+
+                          $existingEntry | Add-Member -NotePropertyName $property -NotePropertyValue $incomingEntry.$property
                       }
 
                       $existingVersions = @($existingEntry.versions)
