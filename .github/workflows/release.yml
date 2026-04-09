@@ -41,32 +41,32 @@ jobs:
                   -ManifestSourceUrl https://github.com/${{ github.repository }}/releases/download/${{ env.RELEASE_TAG }}/${{ env.PLUGIN_ASSET_NAME }}
                   -ManifestOutputPath artifacts/manifest.json
 
-                        - name: Validate Jellyfin manifest shape
-                            shell: pwsh
-                            run: |
-                                    $ErrorActionPreference = 'Stop'
-                                    $manifest = Get-Content artifacts/manifest.json -Raw | ConvertFrom-Json
-                                    if ($manifest -isnot [System.Array]) {
-                                            throw 'artifacts/manifest.json must have an array at the root for Jellyfin custom repositories.'
-                                    }
+            - name: Validate Jellyfin manifest shape
+              shell: pwsh
+              run: |
+                  $ErrorActionPreference = 'Stop'
+                  $manifest = Get-Content artifacts/manifest.json -Raw | ConvertFrom-Json
+                  if ($manifest -isnot [System.Array]) {
+                      throw 'artifacts/manifest.json must have an array at the root for Jellyfin custom repositories.'
+                  }
 
-                        - name: Validate packaged plugin files
-                          shell: pwsh
-                          run: |
-                              $ErrorActionPreference = 'Stop'
-                              Add-Type -AssemblyName System.IO.Compression.FileSystem
-                              $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path "artifacts/${{ env.PLUGIN_ASSET_NAME }}"))
-                              try {
-                                  $entries = $zip.Entries.FullName
-                                  foreach ($requiredEntry in @('Jellyfin.Plugin.Popfeed.dll', 'Jellyfin.Plugin.Popfeed.deps.json')) {
-                                      if ($entries -notcontains $requiredEntry) {
-                                          throw "Release ZIP is missing required file: $requiredEntry"
-                                      }
-                                  }
-                              }
-                              finally {
-                                  $zip.Dispose()
-                              }
+            - name: Validate packaged plugin files
+              shell: pwsh
+              run: |
+                  $ErrorActionPreference = 'Stop'
+                  Add-Type -AssemblyName System.IO.Compression.FileSystem
+                  $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path "artifacts/${{ env.PLUGIN_ASSET_NAME }}"))
+                  try {
+                      $entries = $zip.Entries.FullName
+                      foreach ($requiredEntry in @('Jellyfin.Plugin.Popfeed.dll', 'Jellyfin.Plugin.Popfeed.deps.json')) {
+                          if ($entries -notcontains $requiredEntry) {
+                              throw "Release ZIP is missing required file: $requiredEntry"
+                          }
+                      }
+                  }
+                  finally {
+                      $zip.Dispose()
+                  }
 
             - name: Upload artifact
               uses: actions/upload-artifact@v6
