@@ -21,6 +21,17 @@ $lines = Get-Content $buildYamlPath
 function Get-ScalarValue {
     param([string]$Key)
 
+    $value = Find-ScalarValue -Key $Key
+    if ($null -ne $value) {
+        return $value
+    }
+
+    throw "Missing key '$Key' in build.yaml."
+}
+
+function Find-ScalarValue {
+    param([string]$Key)
+
     foreach ($line in $lines) {
         if ($line -match "^{0}:\s*(.+?)\s*$" -f [regex]::Escape($Key)) {
             $value = $Matches[1].Trim()
@@ -32,7 +43,7 @@ function Get-ScalarValue {
         }
     }
 
-    throw "Missing key '$Key' in build.yaml."
+    return $null
 }
 
 function Get-BlockValue {
@@ -104,6 +115,11 @@ $manifest = @(
         )
     }
 )
+
+$imageUrl = Find-ScalarValue -Key 'imageUrl'
+if (-not [string]::IsNullOrWhiteSpace($imageUrl)) {
+    $manifest[0]['imageUrl'] = $imageUrl
+}
 
 $manifestDirectory = Split-Path -Path $OutputPath -Parent
 if ($manifestDirectory -and -not (Test-Path $manifestDirectory)) {

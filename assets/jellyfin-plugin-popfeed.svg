@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Popfeed plugin icon</title>
+  <desc id="desc">A teal jellyfish shape meeting orange feed bubbles.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08161d" />
+      <stop offset="100%" stop-color="#132832" />
+    </linearGradient>
+    <linearGradient id="jelly" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7cf6ff" />
+      <stop offset="100%" stop-color="#00a4dc" />
+    </linearGradient>
+    <linearGradient id="feed" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffbf69" />
+      <stop offset="100%" stop-color="#ff6b35" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <circle cx="370" cy="146" r="74" fill="#ffffff" opacity="0.06" />
+  <circle cx="151" cy="388" r="96" fill="#ffffff" opacity="0.04" />
+  <path d="M108 222c0-81 66-147 148-147 83 0 149 66 149 147 0 27-8 54-22 77-48-31-107-49-171-49-44 0-84 9-118 24-11-16-18-34-18-52z" fill="url(#jelly)" />
+  <path d="M146 238c37-17 74-25 111-25 53 0 102 15 144 42-16 20-36 36-60 47-26-22-58-34-92-34-22 0-43 5-63 14-17-12-31-28-40-44z" fill="#dffcff" opacity="0.55" />
+  <path d="M172 284c18 16 32 39 40 69 7 26 9 53 5 81h-31c3-24 2-47-4-68-6-23-17-42-31-56z" fill="url(#jelly)" opacity="0.95" />
+  <path d="M236 286c17 15 30 37 38 64 7 24 9 49 6 74h-31c3-22 1-43-5-63-6-21-16-39-29-52z" fill="url(#jelly)" opacity="0.88" />
+  <path d="M297 292c15 14 27 33 35 57 8 24 11 49 8 75h-31c2-22 0-43-6-62-6-19-15-36-28-49z" fill="url(#jelly)" opacity="0.8" />
+  <circle cx="332" cy="231" r="20" fill="url(#feed)" />
+  <circle cx="386" cy="271" r="31" fill="url(#feed)" />
+  <circle cx="435" cy="320" r="22" fill="url(#feed)" />
+  <path d="M333 230l50 38 54 51" fill="none" stroke="#ffd5b7" stroke-linecap="round" stroke-width="14" opacity="0.65" />
+  <path d="M320 349c23 0 41 18 41 41s-18 41-41 41-41-18-41-41 18-41 41-41zm0 25a16 16 0 100 32 16 16 0 000-32z" fill="#ffffff" opacity="0.9" />
+</svg>
