@@ -32,6 +32,7 @@ Each mapping can include:
 - `Identifier`
 - `AppPassword`
 - `PdsUrl` (optional, defaults to `https://bsky.social`)
+- `BlueskyPostLanguage` (optional, defaults to `en`)
 - `PostWatchedItemsToBluesky` (optional)
 - `Enabled` (optional)
 

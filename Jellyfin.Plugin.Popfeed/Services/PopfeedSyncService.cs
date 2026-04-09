@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Popfeed.Configuration;
@@ -248,7 +249,7 @@ public sealed class PopfeedSyncService
                     userConfiguration.Identifier);
 
                 var session = await _client.CreateSessionAsync(userConfiguration, cancellationToken).ConfigureAwait(false);
-                await writer.SyncAsync(
+                var activityResult = await writer.SyncAsync(
                     userConfiguration,
                     session,
                     mapped,
@@ -267,14 +268,24 @@ public sealed class PopfeedSyncService
                     try
                     {
                         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-                        var post = new BlueskyFeedPostRecord
-                        {
-                            Text = activityText,
-                            CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
-                        };
+                        var reviewUrl = activityResult is null ? null : BuildPopfeedReviewUrl(activityResult.Uri);
+                        var post = BuildBlueskyPost(item, userConfiguration.BlueskyPostLanguage, activityText, reviewUrl, activityResult?.Record.Poster, timestamp);
 
-                        await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
+                        var createdPost = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
                         result.PostedToBluesky = true;
+
+                        if (activityResult is not null)
+                        {
+                            activityResult.Record.CrossPosts ??= new PopfeedReviewCrossPosts();
+                            activityResult.Record.CrossPosts.Bluesky = createdPost.Uri;
+                            await _client.PutRecordAsync(
+                                userConfiguration.PdsUrl,
+                                session,
+                                "social.popfeed.feed.review",
+                                GetRecordKey(activityResult.Uri),
+                                activityResult.Record,
+                                cancellationToken).ConfigureAwait(false);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -338,6 +349,19 @@ public sealed class PopfeedSyncService
 
     private static string BuildWatchedActivityText(BaseItem item)
     {
+        return BuildWatchedActivityText(item, "en");
+    }
+
+    private static string BuildWatchedActivityText(BaseItem item, string languageCode)
+    {
+        var normalizedLanguage = NormalizeLanguageCode(languageCode);
+        return normalizedLanguage == "fr"
+            ? BuildFrenchWatchedActivityText(item)
+            : BuildEnglishWatchedActivityText(item);
+    }
+
+    private static string BuildEnglishWatchedActivityText(BaseItem item)
+    {
         var summary = item switch
         {
             Episode episode when episode.Series is not null => $"watched {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)}",
@@ -347,6 +371,19 @@ public sealed class PopfeedSyncService
         };
 
         return TruncateBlueskyPost($"I {summary} on Jellyfin via Popfeed.");
+    }
+
+    private static string BuildFrenchWatchedActivityText(BaseItem item)
+    {
+        var summary = item switch
+        {
+            Episode episode when episode.Series is not null => $"J'ai regardé {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)} sur Jellyfin via Popfeed.",
+            Movie movie when movie.ProductionYear.HasValue => $"J'ai regardé {movie.Name} ({movie.ProductionYear.Value}) sur Jellyfin via Popfeed.",
+            Movie movie => $"J'ai regardé {movie.Name} sur Jellyfin via Popfeed.",
+            _ => $"J'ai regardé {item.Name} sur Jellyfin via Popfeed.",
+        };
+
+        return TruncateBlueskyPost(summary);
     }
 
     private static string FormatEpisodeLabel(Episode episode)
@@ -364,6 +401,113 @@ public sealed class PopfeedSyncService
     private static string ToAtProtoDateTime(DateTime dateTime)
     {
         return dateTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static BlueskyFeedPostRecord BuildBlueskyPost(
+        BaseItem item,
+        string languageCode,
+        string fallbackActivityText,
+        string? reviewUrl,
+        AtProtoBlob? thumb,
+        DateTimeOffset timestamp)
+    {
+        var normalizedLanguage = NormalizeLanguageCode(languageCode);
+        var linkLabel = normalizedLanguage == "fr" ? "Voir sur Popfeed" : "Open on Popfeed";
+        var text = BuildWatchedActivityText(item, normalizedLanguage);
+        var postText = string.IsNullOrWhiteSpace(reviewUrl)
+            ? text
+            : TruncateBlueskyPost(text + "\n\n" + linkLabel);
+
+        var post = new BlueskyFeedPostRecord
+        {
+            Text = postText,
+            CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+            Langs = [normalizedLanguage],
+            Facets = [],
+        };
+
+        if (!string.IsNullOrWhiteSpace(reviewUrl))
+        {
+            var linkStart = postText.LastIndexOf(linkLabel, StringComparison.Ordinal);
+            if (linkStart >= 0)
+            {
+                post.Facets.Add(new BlueskyRichTextFacet
+                {
+                    Index = new BlueskyRichTextFacetIndex
+                    {
+                        ByteStart = GetUtf8ByteCount(postText[..linkStart]),
+                        ByteEnd = GetUtf8ByteCount(postText[..(linkStart + linkLabel.Length)]),
+                    },
+                    Features = [new BlueskyLinkFacetFeature { Uri = reviewUrl }],
+                });
+            }
+
+            post.Embed = new BlueskyExternalEmbed
+            {
+                External = new BlueskyExternalObject
+                {
+                    Uri = reviewUrl,
+                    Title = BuildExternalEmbedTitle(item, normalizedLanguage),
+                    Description = TruncateBlueskyDescription(fallbackActivityText),
+                    Thumb = thumb,
+                },
+            };
+        }
+
+        return post;
+    }
+
+    private static string BuildExternalEmbedTitle(BaseItem item, string languageCode)
+    {
+        var itemTitle = item is Movie movie && movie.ProductionYear.HasValue
+            ? $"{movie.Name} ({movie.ProductionYear.Value})"
+            : item.Name;
+
+        return languageCode == "fr"
+            ? $"Activité Popfeed pour {itemTitle}"
+            : $"Popfeed activity for {itemTitle}";
+    }
+
+    private static string TruncateBlueskyDescription(string text)
+    {
+        const int maxDescriptionLength = 100;
+        return text.Length <= maxDescriptionLength
+            ? text
+            : text[..(maxDescriptionLength - 1)] + "…";
+    }
+
+    private static string BuildPopfeedReviewUrl(string reviewUri)
+    {
+        return "https://popfeed.social/review/" + Uri.EscapeDataString(reviewUri);
+    }
+
+    private static int GetUtf8ByteCount(string value)
+    {
+        return Encoding.UTF8.GetByteCount(value);
+    }
+
+    private static string NormalizeLanguageCode(string? languageCode)
+    {
+        if (string.IsNullOrWhiteSpace(languageCode))
+        {
+            return "en";
+        }
+
+        var trimmed = languageCode.Trim();
+        return trimmed.Contains('-', StringComparison.Ordinal)
+            ? trimmed
+            : trimmed.ToLowerInvariant();
+    }
+
+    private static string GetRecordKey(string uri)
+    {
+        var segments = uri.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            throw new InvalidOperationException($"Could not extract rkey from URI '{uri}'.");
+        }
+
+        return segments[^1];
     }
 
     private static string TruncateBlueskyPost(string text)

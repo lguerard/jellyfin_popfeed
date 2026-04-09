@@ -29,7 +29,7 @@ public interface IPopfeedWatchStateWriter
     /// <param name="removeWhenUnplayed">Whether to delete the Popfeed record when marking unwatched.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task.</returns>
-    Task SyncAsync(
+    Task<PopfeedActivityWriteResult?> SyncAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
         PopfeedMappedItem mappedItem,

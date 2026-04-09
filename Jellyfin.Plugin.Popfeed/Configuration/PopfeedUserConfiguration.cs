@@ -48,6 +48,11 @@ public sealed class PopfeedUserConfiguration
     public bool PostWatchedItemsToBluesky { get; set; }
 
     /// <summary>
+    /// Gets or sets the preferred language code for generated Bluesky posts.
+    /// </summary>
+    public string BlueskyPostLanguage { get; set; } = "en";
+
+    /// <summary>
     /// Determines whether the mapping has enough information to sync.
     /// </summary>
     /// <returns><see langword="true"/> when the mapping is valid.</returns>

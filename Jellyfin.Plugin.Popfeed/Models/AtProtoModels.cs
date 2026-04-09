@@ -81,6 +81,56 @@ public sealed class AtProtoCreateRecordResponse
 }
 
 /// <summary>
+/// A generic ATProto blob reference.
+/// </summary>
+public sealed class AtProtoBlob
+{
+    /// <summary>
+    /// Gets or sets the type discriminator.
+    /// </summary>
+    [JsonPropertyName("$type")]
+    public string Type { get; set; } = "blob";
+
+    /// <summary>
+    /// Gets or sets the blob reference.
+    /// </summary>
+    public AtProtoLink Ref { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets the mime type.
+    /// </summary>
+    public string MimeType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the blob size.
+    /// </summary>
+    public long Size { get; set; }
+}
+
+/// <summary>
+/// A generic ATProto CID link.
+/// </summary>
+public sealed class AtProtoLink
+{
+    /// <summary>
+    /// Gets or sets the CID link value.
+    /// </summary>
+    [JsonPropertyName("$link")]
+    public string Link { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Blob upload response.
+/// </summary>
+public sealed class AtProtoUploadBlobResponse
+{
+    /// <summary>
+    /// Gets or sets the uploaded blob.
+    /// </summary>
+    public AtProtoBlob Blob { get; set; } = new();
+}
+
+/// <summary>
 /// Popfeed list record.
 /// </summary>
 public sealed class PopfeedListRecord
@@ -206,6 +256,16 @@ public sealed class PopfeedReviewRecord
     public string CreatedAt { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the poster blob.
+    /// </summary>
+    public AtProtoBlob? Poster { get; set; }
+
+    /// <summary>
+    /// Gets or sets the release date.
+    /// </summary>
+    public string? ReleaseDate { get; set; }
+
+    /// <summary>
     /// Gets or sets record tags.
     /// </summary>
     public List<string> Tags { get; set; } = [];
@@ -224,6 +284,22 @@ public sealed class PopfeedReviewRecord
     /// Gets or sets a value indicating whether this is a revisit.
     /// </summary>
     public bool IsRevisit { get; set; }
+
+    /// <summary>
+    /// Gets or sets cross-post links.
+    /// </summary>
+    public PopfeedReviewCrossPosts? CrossPosts { get; set; }
+}
+
+/// <summary>
+/// Popfeed review cross-post links.
+/// </summary>
+public sealed class PopfeedReviewCrossPosts
+{
+    /// <summary>
+    /// Gets or sets the Bluesky record URI.
+    /// </summary>
+    public string? Bluesky { get; set; }
 }
 
 /// <summary>
@@ -243,9 +319,143 @@ public sealed class BlueskyFeedPostRecord
     public string Text { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the post languages.
+    /// </summary>
+    public List<string> Langs { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets rich text facets.
+    /// </summary>
+    public List<BlueskyRichTextFacet> Facets { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the post embed.
+    /// </summary>
+    public BlueskyExternalEmbed? Embed { get; set; }
+
+    /// <summary>
     /// Gets or sets the creation timestamp.
     /// </summary>
     public string CreatedAt { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Bluesky external embed.
+/// </summary>
+public sealed class BlueskyExternalEmbed
+{
+    /// <summary>
+    /// Gets or sets the type discriminator.
+    /// </summary>
+    [JsonPropertyName("$type")]
+    public string Type { get; set; } = "app.bsky.embed.external";
+
+    /// <summary>
+    /// Gets or sets the external payload.
+    /// </summary>
+    public BlueskyExternalObject External { get; set; } = new();
+}
+
+/// <summary>
+/// Bluesky external object.
+/// </summary>
+public sealed class BlueskyExternalObject
+{
+    /// <summary>
+    /// Gets or sets the target URI.
+    /// </summary>
+    public string Uri { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the embed title.
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the embed description.
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the optional thumbnail blob.
+    /// </summary>
+    public AtProtoBlob? Thumb { get; set; }
+}
+
+/// <summary>
+/// Bluesky rich text facet.
+/// </summary>
+public sealed class BlueskyRichTextFacet
+{
+    /// <summary>
+    /// Gets or sets the type discriminator.
+    /// </summary>
+    [JsonPropertyName("$type")]
+    public string Type { get; set; } = "app.bsky.richtext.facet";
+
+    /// <summary>
+    /// Gets or sets the byte index span.
+    /// </summary>
+    public BlueskyRichTextFacetIndex Index { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets the facet features.
+    /// </summary>
+    public List<BlueskyLinkFacetFeature> Features { get; set; } = [];
+}
+
+/// <summary>
+/// Bluesky rich text facet byte span.
+/// </summary>
+public sealed class BlueskyRichTextFacetIndex
+{
+    /// <summary>
+    /// Gets or sets the start byte offset.
+    /// </summary>
+    public int ByteStart { get; set; }
+
+    /// <summary>
+    /// Gets or sets the end byte offset.
+    /// </summary>
+    public int ByteEnd { get; set; }
+}
+
+/// <summary>
+/// Bluesky link facet feature.
+/// </summary>
+public sealed class BlueskyLinkFacetFeature
+{
+    /// <summary>
+    /// Gets or sets the type discriminator.
+    /// </summary>
+    [JsonPropertyName("$type")]
+    public string Type { get; set; } = "app.bsky.richtext.facet#link";
+
+    /// <summary>
+    /// Gets or sets the linked URI.
+    /// </summary>
+    public string Uri { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Result of writing or locating a Popfeed activity record.
+/// </summary>
+public sealed class PopfeedActivityWriteResult
+{
+    /// <summary>
+    /// Gets or sets the activity URI.
+    /// </summary>
+    public string Uri { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the activity CID.
+    /// </summary>
+    public string Cid { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the persisted review record.
+    /// </summary>
+    public PopfeedReviewRecord Record { get; set; } = new();
 }
 
 /// <summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -21,8 +22,10 @@ public sealed class PopfeedAtProtoClient
 {
     private const string CreateSessionPath = "/xrpc/com.atproto.server.createSession";
     private const string CreateRecordPath = "/xrpc/com.atproto.repo.createRecord";
+    private const string PutRecordPath = "/xrpc/com.atproto.repo.putRecord";
     private const string ListRecordsPath = "/xrpc/com.atproto.repo.listRecords";
     private const string DeleteRecordPath = "/xrpc/com.atproto.repo.deleteRecord";
+    private const string UploadBlobPath = "/xrpc/com.atproto.repo.uploadBlob";
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -137,6 +140,70 @@ public sealed class PopfeedAtProtoClient
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         LogVerbose("Created ATProto record in collection {Collection} on {ServiceUrl}.", collection, serviceUrl);
         return (await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>
+    /// Replaces an existing record.
+    /// </summary>
+    /// <typeparam name="TRecord">The record type.</typeparam>
+    /// <param name="serviceUrl">The PDS URL.</param>
+    /// <param name="session">The current session.</param>
+    /// <param name="collection">The collection name.</param>
+    /// <param name="rkey">The record key.</param>
+    /// <param name="record">The record payload.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The updated record response.</returns>
+    public async Task<AtProtoCreateRecordResponse> PutRecordAsync<TRecord>(
+        string serviceUrl,
+        AtProtoSessionResponse session,
+        string collection,
+        string rkey,
+        TRecord record,
+        CancellationToken cancellationToken)
+    {
+        var client = CreateAuthorizedClient(serviceUrl, session.AccessJwt);
+        var request = new
+        {
+            repo = session.Did,
+            collection,
+            rkey,
+            record,
+        };
+
+        if (Plugin.Instance.Configuration.EnableDebugLogging)
+        {
+            _logger.LogInformation("[PopfeedDebug] Updating ATProto record in {Collection} with rkey {Rkey}: {Record}", collection, rkey, JsonSerializer.Serialize(record, _jsonOptions));
+        }
+
+        using var response = await client.PostAsJsonAsync(PutRecordPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        LogVerbose("Updated ATProto record in collection {Collection} on {ServiceUrl}.", collection, serviceUrl);
+        return (await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>
+    /// Uploads a blob to the repo.
+    /// </summary>
+    /// <param name="serviceUrl">The PDS URL.</param>
+    /// <param name="session">The current session.</param>
+    /// <param name="stream">The content stream.</param>
+    /// <param name="mimeType">The content mime type.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The uploaded blob reference.</returns>
+    public async Task<AtProtoBlob> UploadBlobAsync(
+        string serviceUrl,
+        AtProtoSessionResponse session,
+        Stream stream,
+        string mimeType,
+        CancellationToken cancellationToken)
+    {
+        var client = CreateAuthorizedClient(serviceUrl, session.AccessJwt);
+        using var content = new StreamContent(stream);
+        content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
+        using var response = await client.PostAsync(UploadBlobPath, content, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        var payload = await response.Content.ReadFromJsonAsync<AtProtoUploadBlobResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        return payload!.Blob;
     }
 
     /// <summary>

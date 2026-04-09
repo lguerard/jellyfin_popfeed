@@ -432,6 +432,29 @@
           return { container: container, input: textInput };
         }
 
+        function createSelect(labelText, className, value, options) {
+          var container = document.createElement("div");
+          container.className = "selectContainer";
+          var label = document.createElement("label");
+          label.className = "selectLabel";
+          label.textContent = labelText;
+          var select = document.createElement("select");
+          select.setAttribute("is", "emby-select");
+          select.className = "emby-select-withcolor emby-select " + className;
+
+          options.forEach(function (option) {
+            var element = document.createElement("option");
+            element.value = option.value;
+            element.textContent = option.label;
+            select.appendChild(element);
+          });
+
+          select.value = value || options[0].value;
+          container.appendChild(label);
+          container.appendChild(select);
+          return { container: container, input: select };
+        }
+
         function createUserMappingRow(mapping) {
           var row = document.createElement("div");
           row.className = "popfeedRowCard";
@@ -475,6 +498,21 @@
             "text",
             mapping.PdsUrl || "https://bsky.social",
           );
+          var postLanguage = createSelect(
+            "Bluesky Post Language",
+            "mapping-post-language",
+            mapping.BlueskyPostLanguage || "en",
+            [
+              { value: "en", label: "English" },
+              { value: "fr", label: "French" },
+              { value: "es", label: "Spanish" },
+              { value: "de", label: "German" },
+              { value: "it", label: "Italian" },
+              { value: "pt", label: "Portuguese" },
+              { value: "ja", label: "Japanese" },
+              { value: "ko", label: "Korean" },
+            ],
+          );
           var postToBluesky = createInput(
             "Also Post Watched Items To Bluesky",
             "mapping-post-to-bluesky",
@@ -491,6 +529,7 @@
           grid.appendChild(identifier.container);
           grid.appendChild(password.container);
           grid.appendChild(pds.container);
+          grid.appendChild(postLanguage.container);
           grid.appendChild(postToBluesky.container);
           grid.appendChild(enabled.container);
           row.appendChild(grid);
@@ -534,6 +573,8 @@
                 AppPassword: row.querySelector(".mapping-password").value,
                 PdsUrl: row.querySelector(".mapping-pds-url").value,
                 WatchedListName: row.querySelector(".mapping-watched-list-name")
+                  .value,
+                BlueskyPostLanguage: row.querySelector(".mapping-post-language")
                   .value,
                 PostWatchedItemsToBluesky: row.querySelector(
                   ".mapping-post-to-bluesky",
@@ -807,6 +848,7 @@
                   Enabled: true,
                   PdsUrl: "https://bsky.social",
                   WatchedListName: "Watched",
+                  BlueskyPostLanguage: "en",
                   PostWatchedItemsToBluesky: false,
                 });
               }
@@ -828,6 +870,7 @@
               Enabled: true,
               PdsUrl: "https://bsky.social",
               WatchedListName: "Watched",
+              BlueskyPostLanguage: "en",
               PostWatchedItemsToBluesky: false,
             });
           });
