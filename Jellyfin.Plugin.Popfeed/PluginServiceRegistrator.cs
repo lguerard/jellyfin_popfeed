@@ -13,7 +13,6 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        serviceCollection.AddHttpClient();
         serviceCollection.AddSingleton<PopfeedAtProtoClient>();
         serviceCollection.AddSingleton<IPopfeedWatchStateWriter, PopfeedWatchedListWriter>();
         serviceCollection.AddSingleton<PopfeedSyncStatusStore>();
