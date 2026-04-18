@@ -261,6 +261,11 @@ public sealed class PopfeedReviewRecord
     public AtProtoBlob? Poster { get; set; }
 
     /// <summary>
+    /// Gets or sets the poster URL.
+    /// </summary>
+    public string? PosterUrl { get; set; }
+
+    /// <summary>
     /// Gets or sets the release date.
     /// </summary>
     public string? ReleaseDate { get; set; }

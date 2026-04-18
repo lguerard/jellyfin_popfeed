@@ -222,7 +222,7 @@ public sealed class PopfeedSyncService
         result.CreativeWorkType = mapped.CreativeWorkType;
         result.Identifiers = mapped.Identifiers;
         result.WouldSync = true;
-        var activityText = BuildWatchedActivityText(item);
+        var activityText = BuildWatchedActivityText(item, userConfiguration.BlueskyPostLanguage);
 
         if (!executeRemote)
         {
@@ -268,7 +268,7 @@ public sealed class PopfeedSyncService
                     try
                     {
                         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-                        var reviewUrl = activityResult is null ? null : BuildPopfeedReviewUrl(activityResult.Uri);
+                        var reviewUrl = activityResult is null ? null : BuildPopfeedReviewUrl(activityResult.Uri, session.Handle);
                         var post = BuildBlueskyPost(item, userConfiguration.BlueskyPostLanguage, activityText, reviewUrl, activityResult?.Record.Poster, timestamp);
 
                         var createdPost = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
@@ -476,9 +476,12 @@ public sealed class PopfeedSyncService
             : text[..(maxDescriptionLength - 1)] + "…";
     }
 
-    private static string BuildPopfeedReviewUrl(string reviewUri)
+    private static string BuildPopfeedReviewUrl(string reviewUri, string handle)
     {
-        return "https://popfeed.social/review/" + Uri.EscapeDataString(reviewUri);
+        // reviewUri is an AT-URI: at://{did}/{collection}/{rkey}
+        // Popfeed web URL format: https://popfeed.social/profile/{handle}/review/{rkey}
+        var rkey = GetRecordKey(reviewUri);
+        return $"https://popfeed.social/profile/{Uri.EscapeDataString(handle)}/review/{rkey}";
     }
 
     private static int GetUtf8ByteCount(string value)

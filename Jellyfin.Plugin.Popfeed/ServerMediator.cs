@@ -50,9 +50,20 @@ public sealed class ServerMediator : IHostedService
     {
         try
         {
-            if (!string.Equals(eventArgs.SaveReason.ToString(), "TogglePlayed", StringComparison.Ordinal) || eventArgs.Item is null)
+            var saveReason = eventArgs.SaveReason.ToString();
+            var isTogglePlayed = string.Equals(saveReason, "TogglePlayed", StringComparison.Ordinal);
+            var isPlaybackFinished = string.Equals(saveReason, "PlaybackFinished", StringComparison.Ordinal);
+
+            if ((!isTogglePlayed && !isPlaybackFinished) || eventArgs.Item is null)
             {
                 LogVerbose("Ignoring user data save event because save reason is {SaveReason} or item is missing.", eventArgs.SaveReason);
+                return;
+            }
+
+            // PlaybackFinished fires for partial views too; only proceed when the item is fully played.
+            if (isPlaybackFinished && !(eventArgs.UserData?.Played ?? false))
+            {
+                LogVerbose("Ignoring PlaybackFinished event for {ItemName} because item is not yet fully played.", eventArgs.Item.Name);
                 return;
             }
 
@@ -70,7 +81,7 @@ public sealed class ServerMediator : IHostedService
             }
 
             DateTimeOffset? playedAt = eventArgs.UserData?.LastPlayedDate.HasValue == true
-                ? new DateTimeOffset(eventArgs.UserData.LastPlayedDate.Value)
+                ? new DateTimeOffset(DateTime.SpecifyKind(eventArgs.UserData.LastPlayedDate.Value, DateTimeKind.Utc))
                 : (DateTimeOffset?)null;
 
             LogVerbose(

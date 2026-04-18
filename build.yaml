@@ -2,7 +2,7 @@
 name: "Popfeed"
 guid: "14af54bf-b9d9-4c8a-8c16-a8e993f8ec08"
 imageUrl: "https://raw.githubusercontent.com/lguerard/jellyfin_popfeed/main/assets/jellyfin-plugin-popfeed.svg"
-version: "0.1.0.0"
+version: "0.2.0.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 owner: "lguer"
@@ -13,8 +13,10 @@ category: "General"
 artifacts:
 - "Jellyfin.Plugin.Popfeed.dll"
 changelog: |-
-  - Initial Popfeed sync plugin release
-  - Added per-user Popfeed mappings
-  - Added searchable exclusion UI and dry-run test endpoint
-  - Added recent sync activity panel in the plugin settings page
-  - Added GitHub-release manifest generation for direct Jellyfin repository install
+  - Trigger sync on PlaybackFinished (watching a film/episode to completion) in addition to manual TogglePlayed toggles
+  - Fix Popfeed review URL in Bluesky posts (was posting a raw AT-URI, now posts the correct /profile/{handle}/review/{rkey} link)
+  - Fix activity text language: Popfeed review text now respects the configured Bluesky post language per user
+  - Fix watched timestamp timezone ambiguity: LastPlayedDate is now correctly treated as UTC
+  - Add native Popfeed watched-list (social.popfeed.feed.listItem) records alongside review records
+  - Upload and attach poster images to Popfeed review records
+  - Stale plugin directories are cleaned up automatically on startup/reinstall

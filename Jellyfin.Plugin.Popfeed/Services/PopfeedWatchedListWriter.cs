@@ -19,6 +19,8 @@ namespace Jellyfin.Plugin.Popfeed.Services;
 /// </summary>
 public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 {
+    private const string ListCollection = "social.popfeed.feed.list";
+    private const string ListItemCollection = "social.popfeed.feed.listItem";
     private const string ReviewCollection = "social.popfeed.feed.review";
     private readonly PopfeedAtProtoClient _client;
     private readonly ILogger<PopfeedWatchedListWriter> _logger;
@@ -53,9 +55,28 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
         var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, activityText, cancellationToken).ConfigureAwait(false);
+        var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
+        var existingListItem = await FindExistingListItemAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
 
         if (played)
         {
+            if (existingListItem is null)
+            {
+                var timestamp = playedAt ?? DateTimeOffset.UtcNow;
+                var listItemRecord = new PopfeedListItemRecord
+                {
+                    Identifiers = mappedItem.Identifiers,
+                    CreativeWorkType = mappedItem.CreativeWorkType,
+                    ListUri = watchedListUri,
+                    AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                    CompletedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                    Title = title,
+                };
+
+                await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRecord, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Synced watched list item for {ItemName} to Popfeed account {Identifier}.", title, userConfiguration.Identifier);
+            }
+
             if (existingRecord is not null)
             {
                 var mergedRecord = MergeExistingReview(existingRecord.Value, desiredRecord);
@@ -100,12 +121,96 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         if (!removeWhenUnplayed || existingRecord is null)
         {
             LogVerbose("Skipping delete for {ItemName}: removeWhenUnplayed={RemoveWhenUnplayed}, recordExists={RecordExists}.", title, removeWhenUnplayed, existingRecord is not null);
+            if (removeWhenUnplayed && existingListItem is not null)
+            {
+                var listItemRkey = GetRecordKey(existingListItem.Uri);
+                await _client.DeleteRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRkey, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Removed watched list item for {ItemName} from Popfeed account {Identifier}.", title, userConfiguration.Identifier);
+            }
+
             return null;
         }
 
         var rkey = GetRecordKey(existingRecord.Uri);
         await _client.DeleteRecordAsync(userConfiguration.PdsUrl, session, ReviewCollection, rkey, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Removed Popfeed activity for {ItemName} from account {Identifier}.", title, userConfiguration.Identifier);
+
+        if (removeWhenUnplayed && existingListItem is not null)
+        {
+            var listItemRkey = GetRecordKey(existingListItem.Uri);
+            await _client.DeleteRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRkey, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Removed watched list item for {ItemName} from Popfeed account {Identifier}.", title, userConfiguration.Identifier);
+        }
+
+        return null;
+    }
+
+    private async Task<string> EnsureWatchedListAsync(PopfeedUserConfiguration userConfiguration, AtProtoSessionResponse session, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(userConfiguration.WatchedListUri))
+        {
+            LogVerbose("Using cached watched list URI for account {Identifier}: {WatchedListUri}", userConfiguration.Identifier, userConfiguration.WatchedListUri);
+            return userConfiguration.WatchedListUri;
+        }
+
+        var listName = string.IsNullOrWhiteSpace(userConfiguration.WatchedListName) ? "Watched" : userConfiguration.WatchedListName;
+        string? cursor = null;
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListRecord>(userConfiguration.PdsUrl, session, ListCollection, cursor, cancellationToken).ConfigureAwait(false);
+            var existing = page.Records.FirstOrDefault(record => string.Equals(record.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                userConfiguration.WatchedListUri = existing.Uri;
+                Plugin.Instance.SaveConfiguration();
+                LogVerbose("Found existing watched list {ListName} for account {Identifier}: {WatchedListUri}", listName, userConfiguration.Identifier, existing.Uri);
+                return existing.Uri;
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        var newRecord = new PopfeedListRecord
+        {
+            Name = listName,
+            Description = "Created by Jellyfin Popfeed plugin to mirror watched history.",
+            CreatedAt = ToAtProtoDateTime(DateTime.UtcNow),
+            Ordered = false,
+        };
+
+        var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListCollection, newRecord, cancellationToken).ConfigureAwait(false);
+        userConfiguration.WatchedListUri = created.Uri;
+        Plugin.Instance.SaveConfiguration();
+        LogVerbose("Created watched list {ListName} for account {Identifier}: {WatchedListUri}", listName, userConfiguration.Identifier, created.Uri);
+        return created.Uri;
+    }
+
+    private async Task<AtProtoRecord<PopfeedListItemRecord>?> FindExistingListItemAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string watchedListUri,
+        PopfeedIdentifiers identifiers,
+        CancellationToken cancellationToken)
+    {
+        string? cursor = null;
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(userConfiguration.PdsUrl, session, ListItemCollection, cursor, cancellationToken).ConfigureAwait(false);
+            var match = page.Records.FirstOrDefault(record =>
+                string.Equals(record.Value.ListUri, watchedListUri, StringComparison.Ordinal)
+                && record.Value.Identifiers.Matches(identifiers));
+
+            if (match is not null)
+            {
+                LogVerbose("Found matching watched list item for identifiers in list {WatchedListUri}.", watchedListUri);
+                return match;
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
         return null;
     }
 
@@ -170,6 +275,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
 
         record.Poster = await TryUploadPosterAsync(userConfiguration, session, item, cancellationToken).ConfigureAwait(false);
+        record.PosterUrl = BuildPosterUrl(session.Did, record.Poster);
         return record;
     }
 
@@ -254,6 +360,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             CreativeWorkType = desired.CreativeWorkType,
             CreatedAt = existing.CreatedAt,
             Poster = existing.Poster ?? desired.Poster,
+            PosterUrl = existing.PosterUrl ?? desired.PosterUrl,
             ReleaseDate = existing.ReleaseDate ?? desired.ReleaseDate,
             Tags = existing.Tags.Count > 0 ? existing.Tags : desired.Tags,
             Facets = existing.Facets.Count > 0 ? existing.Facets : desired.Facets,
@@ -267,9 +374,30 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
     {
         return !string.Equals(existing.Title, merged.Title, StringComparison.Ordinal)
             || !string.Equals(existing.Text, merged.Text, StringComparison.Ordinal)
+            || !string.Equals(existing.PosterUrl, merged.PosterUrl, StringComparison.Ordinal)
             || !string.Equals(existing.ReleaseDate, merged.ReleaseDate, StringComparison.Ordinal)
             || (existing.Poster is null && merged.Poster is not null)
             || existing.Tags.Count == 0 && merged.Tags.Count > 0;
+    }
+
+    private static string? BuildPosterUrl(string did, AtProtoBlob? blob)
+    {
+        if (blob is null || string.IsNullOrWhiteSpace(blob.Ref.Link) || string.IsNullOrWhiteSpace(blob.MimeType))
+        {
+            return null;
+        }
+
+        var extension = blob.MimeType switch
+        {
+            "image/jpeg" => "jpeg",
+            "image/png" => "png",
+            "image/webp" => "webp",
+            _ => null,
+        };
+
+        return extension is null
+            ? null
+            : $"https://cdn.bsky.app/img/feed_fullsize/plain/{did}/{blob.Ref.Link}@{extension}";
     }
 
     private static string ToAtProtoDateTime(DateTime dateTime)
