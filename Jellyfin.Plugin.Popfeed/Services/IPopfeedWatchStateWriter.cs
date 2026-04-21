@@ -37,6 +37,7 @@ public interface IPopfeedWatchStateWriter
         string activityText,
         BaseItem item,
         bool played,
+        bool inProgress,
         DateTimeOffset? playedAt,
         bool removeWhenUnplayed,
         CancellationToken cancellationToken);

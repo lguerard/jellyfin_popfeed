@@ -48,33 +48,63 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         string activityText,
         BaseItem item,
         bool played,
+        bool inProgress,
         DateTimeOffset? playedAt,
         bool removeWhenUnplayed,
         CancellationToken cancellationToken)
     {
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
-        var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, activityText, cancellationToken).ConfigureAwait(false);
+        var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
         var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
         var existingListItem = await FindExistingListItemAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
 
-        if (played)
+        if (played || inProgress)
         {
+            var timestamp = playedAt ?? DateTimeOffset.UtcNow;
+            var desiredStatus = played ? "#finished" : "#watching";
             if (existingListItem is null)
             {
-                var timestamp = playedAt ?? DateTimeOffset.UtcNow;
                 var listItemRecord = new PopfeedListItemRecord
                 {
                     Identifiers = mappedItem.Identifiers,
                     CreativeWorkType = mappedItem.CreativeWorkType,
                     ListUri = watchedListUri,
+                    Status = desiredStatus,
                     AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
-                    CompletedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                    CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null,
                     Title = title,
                 };
 
                 await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRecord, cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("Synced watched list item for {ItemName} to Popfeed account {Identifier}.", title, userConfiguration.Identifier);
+            }
+            else if (existingListItem is not null)
+            {
+                var needsUpdate = !string.Equals(existingListItem.Value.Status, desiredStatus, StringComparison.Ordinal)
+                    || !string.Equals(existingListItem.Value.Title, title, StringComparison.Ordinal)
+                    || (played && existingListItem.Value.CompletedAt is null)
+                    || (!played && existingListItem.Value.CompletedAt is not null);
+
+                if (needsUpdate)
+                {
+                    existingListItem.Value.Status = desiredStatus;
+                    existingListItem.Value.Title = title;
+                    existingListItem.Value.CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null;
+                    if (string.IsNullOrWhiteSpace(existingListItem.Value.AddedAt))
+                    {
+                        existingListItem.Value.AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime);
+                    }
+
+                    await _client.PutRecordAsync(
+                        userConfiguration.PdsUrl,
+                        session,
+                        ListItemCollection,
+                        GetRecordKey(existingListItem.Uri),
+                        existingListItem.Value,
+                        cancellationToken).ConfigureAwait(false);
+                    _logger.LogInformation("Updated watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
+                }
             }
 
             if (existingRecord is not null)
@@ -218,7 +248,6 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
         PopfeedIdentifiers identifiers,
-        string activityText,
         CancellationToken cancellationToken)
     {
         string? cursor = null;
@@ -226,8 +255,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         {
             var page = await _client.ListRecordsAsync<PopfeedReviewRecord>(userConfiguration.PdsUrl, session, ReviewCollection, cursor, cancellationToken).ConfigureAwait(false);
             var match = page.Records.FirstOrDefault(record =>
-                record.Value.Identifiers.Matches(identifiers)
-                && string.Equals(record.Value.Text, activityText, StringComparison.Ordinal));
+                record.Value.Identifiers.Matches(identifiers));
 
             if (match is not null)
             {

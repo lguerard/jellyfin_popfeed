@@ -51,19 +51,22 @@ public sealed class ServerMediator : IHostedService
         try
         {
             var saveReason = eventArgs.SaveReason.ToString();
-            var isTogglePlayed = string.Equals(saveReason, "TogglePlayed", StringComparison.Ordinal);
-            var isPlaybackFinished = string.Equals(saveReason, "PlaybackFinished", StringComparison.Ordinal);
-
-            if ((!isTogglePlayed && !isPlaybackFinished) || eventArgs.Item is null)
+            if (eventArgs.Item is null || eventArgs.UserData is null)
             {
-                LogVerbose("Ignoring user data save event because save reason is {SaveReason} or item is missing.", eventArgs.SaveReason);
+                LogVerbose("Ignoring user data save event because item or user data is missing. SaveReason={SaveReason}.", eventArgs.SaveReason);
                 return;
             }
 
-            // PlaybackFinished fires for partial views too; only proceed when the item is fully played.
-            if (isPlaybackFinished && !(eventArgs.UserData?.Played ?? false))
+            var isPlayed = eventArgs.UserData.Played;
+            var isPlaybackStart = string.Equals(saveReason, "PlaybackStart", StringComparison.Ordinal);
+            var isPlaybackProgress = string.Equals(saveReason, "PlaybackProgress", StringComparison.Ordinal);
+            var isPlaybackFinished = string.Equals(saveReason, "PlaybackFinished", StringComparison.Ordinal);
+            var isTogglePlayed = string.Equals(saveReason, "TogglePlayed", StringComparison.Ordinal);
+            var isWatching = !isPlayed && (isPlaybackStart || isPlaybackProgress || isPlaybackFinished);
+
+            if (!isPlayed && !isWatching && !isTogglePlayed)
             {
-                LogVerbose("Ignoring PlaybackFinished event for {ItemName} because item is not yet fully played.", eventArgs.Item.Name);
+                LogVerbose("Ignoring user data save event because save reason {SaveReason} does not reflect a playable state.", eventArgs.SaveReason);
                 return;
             }
 
@@ -80,18 +83,21 @@ public sealed class ServerMediator : IHostedService
                 return;
             }
 
-            DateTimeOffset? playedAt = eventArgs.UserData?.LastPlayedDate.HasValue == true
-                ? new DateTimeOffset(DateTime.SpecifyKind(eventArgs.UserData.LastPlayedDate.Value, DateTimeKind.Utc))
+            var userData = eventArgs.UserData;
+            DateTimeOffset? playedAt = userData.LastPlayedDate.HasValue
+                ? new DateTimeOffset(DateTime.SpecifyKind(userData.LastPlayedDate.Value, DateTimeKind.Utc))
                 : (DateTimeOffset?)null;
 
             LogVerbose(
-                "Received TogglePlayed event for {ItemName}. UserId={UserId}, Played={Played}, PlayedAt={PlayedAt}",
+                "Received user data save event for {ItemName}. SaveReason={SaveReason}, UserId={UserId}, Played={Played}, InProgress={InProgress}, PlayedAt={PlayedAt}",
                 eventArgs.Item.Name,
+                eventArgs.SaveReason,
                 eventArgs.UserId,
-                eventArgs.UserData?.Played ?? false,
+                isPlayed,
+                isWatching,
                 playedAt);
 
-            await _syncService.SyncPlaystateAsync(eventArgs.UserId, eventArgs.Item, eventArgs.UserData?.Played ?? false, playedAt, CancellationToken.None).ConfigureAwait(false);
+            await _syncService.SyncPlaystateAsync(eventArgs.UserId, eventArgs.Item, isPlayed, isWatching, playedAt, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

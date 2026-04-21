@@ -49,12 +49,13 @@ public sealed class PopfeedSyncService
     /// <param name="item">The media item.</param>
     /// <param name="jellyfinUserId">The Jellyfin user id.</param>
     /// <param name="played">Whether the item is now marked watched.</param>
+    /// <param name="inProgress">Whether the item is currently in progress.</param>
     /// <param name="playedAt">The watched timestamp.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task.</returns>
-    public async Task SyncPlaystateAsync(Guid jellyfinUserId, BaseItem item, bool played, DateTimeOffset? playedAt, CancellationToken cancellationToken)
+    public async Task SyncPlaystateAsync(Guid jellyfinUserId, BaseItem item, bool played, bool inProgress, DateTimeOffset? playedAt, CancellationToken cancellationToken)
     {
-        _ = await ExecuteSyncCoreAsync(jellyfinUserId, item, played, playedAt, true, "event", cancellationToken).ConfigureAwait(false);
+        _ = await ExecuteSyncCoreAsync(jellyfinUserId, item, played, inProgress, playedAt, true, "event", cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -68,7 +69,7 @@ public sealed class PopfeedSyncService
     /// <returns>The sync test result.</returns>
     public Task<PopfeedSyncTestResult> TestSyncAsync(Guid jellyfinUserId, BaseItem item, bool played, bool dryRun, CancellationToken cancellationToken)
     {
-        return ExecuteSyncCoreAsync(jellyfinUserId, item, played, DateTimeOffset.UtcNow, !dryRun, "test", cancellationToken);
+        return ExecuteSyncCoreAsync(jellyfinUserId, item, played, false, DateTimeOffset.UtcNow, !dryRun, "test", cancellationToken);
     }
 
     /// <summary>
@@ -121,6 +122,24 @@ public sealed class PopfeedSyncService
                 : new PopfeedMappedItem("movie", identifiers);
         }
 
+        if (item is Season season && season.Series is not null && season.IndexNumber.HasValue)
+        {
+            var identifiers = new PopfeedIdentifiers
+            {
+                ImdbId = GetProviderId(season, MetadataProvider.Imdb),
+                TmdbId = GetProviderId(season, MetadataProvider.Tmdb),
+                TmdbTvSeriesId = GetProviderId(season.Series, MetadataProvider.Tmdb),
+                SeasonNumber = season.IndexNumber,
+            };
+
+            var hasSeasonShape = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId) && identifiers.SeasonNumber.HasValue;
+            var hasStandaloneId = !string.IsNullOrWhiteSpace(identifiers.ImdbId) || !string.IsNullOrWhiteSpace(identifiers.TmdbId);
+
+            return (!hasSeasonShape && !hasStandaloneId)
+                ? null
+                : new PopfeedMappedItem("tv_season", identifiers);
+        }
+
         if (item is Episode episode && episode.Series is not null && episode.IndexNumber.HasValue)
         {
             var identifiers = new PopfeedIdentifiers
@@ -150,10 +169,22 @@ public sealed class PopfeedSyncService
             : null;
     }
 
+    private static bool ShouldPostToBluesky(BaseItem item, PopfeedUserConfiguration userConfiguration)
+    {
+        if (!userConfiguration.PostWatchedItemsToBluesky)
+        {
+            return false;
+        }
+
+        return !string.Equals(userConfiguration.BlueskyPostMode, "season", StringComparison.OrdinalIgnoreCase)
+            || item is not Episode;
+    }
+
     private async Task<PopfeedSyncTestResult> ExecuteSyncCoreAsync(
         Guid jellyfinUserId,
         BaseItem item,
         bool played,
+        bool inProgress,
         DateTimeOffset? playedAt,
         bool executeRemote,
         string triggerSource,
@@ -222,15 +253,16 @@ public sealed class PopfeedSyncService
         result.CreativeWorkType = mapped.CreativeWorkType;
         result.Identifiers = mapped.Identifiers;
         result.WouldSync = true;
-        var activityText = BuildWatchedActivityText(item, userConfiguration.BlueskyPostLanguage);
+        var activityText = BuildActivityText(item, userConfiguration.BlueskyPostLanguage, played, inProgress);
+        var shouldPostToBluesky = played && userConfiguration.PostWatchedItemsToBluesky && ShouldPostToBluesky(item, userConfiguration);
 
         if (!executeRemote)
         {
             result.Success = true;
             result.Executed = false;
-            result.CreatedPopfeedActivity = played;
-            result.PostedToBluesky = played && userConfiguration.PostWatchedItemsToBluesky;
-            result.Message = BuildDryRunMessage(played, result.PostedToBluesky);
+            result.CreatedPopfeedActivity = played || inProgress;
+            result.PostedToBluesky = shouldPostToBluesky;
+            result.Message = BuildDryRunMessage(played, inProgress, result.PostedToBluesky);
             LogVerbose("Dry run successful for {ItemName}. UserId={UserId}, Identifier={Identifier}", item.Name, jellyfinUserId, userConfiguration.Identifier);
             return CompleteResult(result, triggerSource);
         }
@@ -241,10 +273,11 @@ public sealed class PopfeedSyncService
             try
             {
                 LogVerbose(
-                    "Starting Popfeed sync for {ItemName}. UserId={UserId}, Played={Played}, Provider={Provider}, Identifier={Identifier}",
+                    "Starting Popfeed sync for {ItemName}. UserId={UserId}, Played={Played}, InProgress={InProgress}, Provider={Provider}, Identifier={Identifier}",
                     item.Name,
                     jellyfinUserId,
                     played,
+                    inProgress,
                     configuration.WatchStateProvider,
                     userConfiguration.Identifier);
 
@@ -257,13 +290,14 @@ public sealed class PopfeedSyncService
                     activityText,
                     item,
                     played,
+                    inProgress,
                     playedAt,
                     configuration.RemoveFromWatchedListWhenUnplayed,
                     cancellationToken).ConfigureAwait(false);
 
-                result.CreatedPopfeedActivity = played;
+                result.CreatedPopfeedActivity = played || inProgress;
 
-                if (played && userConfiguration.PostWatchedItemsToBluesky)
+                if (shouldPostToBluesky)
                 {
                     try
                     {
@@ -299,7 +333,7 @@ public sealed class PopfeedSyncService
 
                 result.Success = true;
                 result.Executed = true;
-                result.Message = BuildSuccessMessage(played, result.PostedToBluesky);
+                result.Message = BuildSuccessMessage(played, inProgress, result.PostedToBluesky);
                 return CompleteResult(result, triggerSource);
             }
             catch (Exception ex)
@@ -323,54 +357,76 @@ public sealed class PopfeedSyncService
         return result;
     }
 
-    private static string BuildDryRunMessage(bool played, bool postToBluesky)
+    private static string BuildDryRunMessage(bool played, bool inProgress, bool postToBluesky)
     {
-        if (!played)
+        if (played)
         {
-            return "Dry run successful. Matching Popfeed activity would be removed when a plugin-created record exists.";
+            return postToBluesky
+                ? "Dry run successful. The item would be posted as Popfeed activity and cross-posted to Bluesky."
+                : "Dry run successful. The item would be posted as Popfeed activity.";
         }
 
-        return postToBluesky
-            ? "Dry run successful. The item would be posted as Popfeed activity and cross-posted to Bluesky."
-            : "Dry run successful. The item would be posted as Popfeed activity.";
-    }
-
-    private static string BuildSuccessMessage(bool played, bool postedToBluesky)
-    {
-        if (!played)
+        if (inProgress)
         {
-            return "Remote sync completed successfully. Matching Popfeed activity was removed when present.";
+            return "Dry run successful. The item would be marked as watching in Popfeed.";
         }
 
-        return postedToBluesky
-            ? "Remote sync completed successfully. Created Popfeed activity and a Bluesky post."
-            : "Remote sync completed successfully. Created Popfeed activity.";
+        return "Dry run successful. Matching Popfeed activity would be removed when a plugin-created record exists.";
     }
 
-    private static string BuildWatchedActivityText(BaseItem item)
+    private static string BuildSuccessMessage(bool played, bool inProgress, bool postedToBluesky)
     {
-        return BuildWatchedActivityText(item, "en");
+        if (played)
+        {
+            return postedToBluesky
+                ? "Remote sync completed successfully. Created Popfeed activity and a Bluesky post."
+                : "Remote sync completed successfully. Created Popfeed activity.";
+        }
+
+        if (inProgress)
+        {
+            return "Remote sync completed successfully. The item was marked as watching in Popfeed.";
+        }
+
+        return "Remote sync completed successfully. Matching Popfeed activity was removed when present.";
     }
 
-    private static string BuildWatchedActivityText(BaseItem item, string languageCode)
+    private static string BuildActivityText(BaseItem item, string languageCode, bool played, bool inProgress)
     {
         var normalizedLanguage = NormalizeLanguageCode(languageCode);
         return normalizedLanguage == "fr"
-            ? BuildFrenchWatchedActivityText(item)
-            : BuildEnglishWatchedActivityText(item);
+            ? BuildFrenchActivityText(item, played, inProgress)
+            : BuildEnglishActivityText(item, played, inProgress);
     }
 
-    private static string BuildEnglishWatchedActivityText(BaseItem item)
+    private static string BuildEnglishActivityText(BaseItem item, bool played, bool inProgress)
     {
         var summary = item switch
         {
-            Episode episode when episode.Series is not null => $"watched {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)}",
-            Movie movie when movie.ProductionYear.HasValue => $"watched {movie.Name} ({movie.ProductionYear.Value})",
-            Movie movie => $"watched {movie.Name}",
-            _ => $"watched {item.Name}",
+            Episode episode when episode.Series is not null => $"{(played ? "watched" : "is watching")} {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)}",
+            Season season when season.Series is not null && season.IndexNumber.HasValue => $"{(played ? "watched" : "is watching")} {season.Series.Name} season {season.IndexNumber.Value:00}",
+            Movie movie when movie.ProductionYear.HasValue => $"{(played ? "watched" : "is watching")} {movie.Name} ({movie.ProductionYear.Value})",
+            Movie movie => $"{(played ? "watched" : "is watching")} {movie.Name}",
+            _ => $"{(played ? "watched" : "is watching")} {item.Name}",
         };
 
-        return TruncateBlueskyPost($"I {summary} on Jellyfin via Popfeed.");
+        return played
+            ? TruncateBlueskyPost($"I {summary} on Jellyfin via Popfeed.")
+            : TruncateBlueskyPost($"I am {summary} on Jellyfin via Popfeed.");
+    }
+
+    private static string BuildFrenchActivityText(BaseItem item, bool played, bool inProgress)
+    {
+        var summary = item switch
+        {
+            Episode episode when episode.Series is not null => $"{(played ? "J'ai regardé" : "Je regarde")} {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)} sur Jellyfin via Popfeed.",
+            Season season when season.Series is not null && season.IndexNumber.HasValue => $"{(played ? "J'ai regardé" : "Je regarde")} la saison {season.IndexNumber.Value:00} de {season.Series.Name} sur Jellyfin via Popfeed.",
+            Movie movie when movie.ProductionYear.HasValue => $"{(played ? "J'ai regardé" : "Je regarde")} {movie.Name} ({movie.ProductionYear.Value}) sur Jellyfin via Popfeed.",
+            Movie movie => $"{(played ? "J'ai regardé" : "Je regarde")} {movie.Name} sur Jellyfin via Popfeed.",
+            _ => $"{(played ? "J'ai regardé" : "Je regarde")} {item.Name} sur Jellyfin via Popfeed.",
+        };
+
+        return summary;
     }
 
     private static string BuildFrenchWatchedActivityText(BaseItem item)
@@ -378,6 +434,7 @@ public sealed class PopfeedSyncService
         var summary = item switch
         {
             Episode episode when episode.Series is not null => $"J'ai regardé {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)} sur Jellyfin via Popfeed.",
+            Season season when season.Series is not null && season.IndexNumber.HasValue => $"J'ai regardé la saison {season.IndexNumber.Value:00} de {season.Series.Name} sur Jellyfin via Popfeed.",
             Movie movie when movie.ProductionYear.HasValue => $"J'ai regardé {movie.Name} ({movie.ProductionYear.Value}) sur Jellyfin via Popfeed.",
             Movie movie => $"J'ai regardé {movie.Name} sur Jellyfin via Popfeed.",
             _ => $"J'ai regardé {item.Name} sur Jellyfin via Popfeed.",
@@ -413,7 +470,7 @@ public sealed class PopfeedSyncService
     {
         var normalizedLanguage = NormalizeLanguageCode(languageCode);
         var linkLabel = normalizedLanguage == "fr" ? "Voir sur Popfeed" : "Open on Popfeed";
-        var text = BuildWatchedActivityText(item, normalizedLanguage);
+        var text = fallbackActivityText;
         var postText = string.IsNullOrWhiteSpace(reviewUrl)
             ? text
             : TruncateBlueskyPost(text + "\n\n" + linkLabel);
