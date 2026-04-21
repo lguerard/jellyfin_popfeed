@@ -53,6 +53,15 @@ public sealed class PopfeedUserConfiguration
     public string BlueskyPostLanguage { get; set; } = "en";
 
     /// <summary>
+    /// Gets or sets the Bluesky post mode for watched items.
+    /// </summary>
+    /// <remarks>
+    /// "episode" posts each watched episode individually.
+    /// "season" posts only when a full season is finished.
+    /// </remarks>
+    public string BlueskyPostMode { get; set; } = "episode";
+
+    /// <summary>
     /// Determines whether the mapping has enough information to sync.
     /// </summary>
     /// <returns><see langword="true"/> when the mapping is valid.</returns>
