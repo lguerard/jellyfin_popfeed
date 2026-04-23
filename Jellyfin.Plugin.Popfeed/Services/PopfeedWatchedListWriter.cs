@@ -62,7 +62,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         if (played || inProgress)
         {
             var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-            var desiredStatus = played ? "#finished" : "#watching";
+            var desiredStatus = played ? "finished" : "watching";
             if (existingListItem is null)
             {
                 var listItemRecord = new PopfeedListItemRecord

@@ -196,7 +196,7 @@ public sealed class PopfeedListItemRecord
     /// <summary>
     /// Gets or sets the status.
     /// </summary>
-    public string Status { get; set; } = "#finished";
+    public string Status { get; set; } = "finished";
 
     /// <summary>
     /// Gets or sets the timestamp when the item was added.
