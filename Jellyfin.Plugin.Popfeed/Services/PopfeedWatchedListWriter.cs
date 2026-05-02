@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -56,7 +57,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
         var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
-        var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
+        var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
         var existingListItem = await FindExistingListItemAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
 
         if (played || inProgress)
@@ -175,15 +176,20 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return null;
     }
 
-    private async Task<string> EnsureWatchedListAsync(PopfeedUserConfiguration userConfiguration, AtProtoSessionResponse session, CancellationToken cancellationToken)
+    private async Task<string> EnsureWatchedListAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string creativeWorkType,
+        CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(userConfiguration.WatchedListUri))
+        var listName = GetWatchedListName(userConfiguration, creativeWorkType);
+        var cachedUri = userConfiguration.GetWatchedListUri(creativeWorkType);
+        if (!string.IsNullOrWhiteSpace(cachedUri))
         {
-            LogVerbose("Using cached watched list URI for account {Identifier}: {WatchedListUri}", userConfiguration.Identifier, userConfiguration.WatchedListUri);
-            return userConfiguration.WatchedListUri;
+            LogVerbose("Using cached watched list URI for account {Identifier}, CreativeWorkType={CreativeWorkType}: {WatchedListUri}", userConfiguration.Identifier, creativeWorkType, cachedUri);
+            return cachedUri;
         }
 
-        var listName = string.IsNullOrWhiteSpace(userConfiguration.WatchedListName) ? "Watched" : userConfiguration.WatchedListName;
         string? cursor = null;
         do
         {
@@ -191,7 +197,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             var existing = page.Records.FirstOrDefault(record => string.Equals(record.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {
-                userConfiguration.WatchedListUri = existing.Uri;
+                userConfiguration.SetWatchedListUri(creativeWorkType, existing.Uri);
                 Plugin.Instance.SaveConfiguration();
                 LogVerbose("Found existing watched list {ListName} for account {Identifier}: {WatchedListUri}", listName, userConfiguration.Identifier, existing.Uri);
                 return existing.Uri;
@@ -210,10 +216,27 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
 
         var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListCollection, newRecord, cancellationToken).ConfigureAwait(false);
-        userConfiguration.WatchedListUri = created.Uri;
+        userConfiguration.SetWatchedListUri(creativeWorkType, created.Uri);
         Plugin.Instance.SaveConfiguration();
         LogVerbose("Created watched list {ListName} for account {Identifier}: {WatchedListUri}", listName, userConfiguration.Identifier, created.Uri);
         return created.Uri;
+    }
+
+    private static string GetWatchedListName(PopfeedUserConfiguration userConfiguration, string creativeWorkType)
+    {
+        var configuredName = userConfiguration.WatchedListName?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredName)
+            && !string.Equals(configuredName, "Watched", StringComparison.OrdinalIgnoreCase))
+        {
+            return configuredName;
+        }
+
+        return creativeWorkType switch
+        {
+            "movie" => "Watched Movies",
+            "tv_episode" or "tv_season" or "tv_show" => "Watched Shows",
+            _ => "Watched",
+        };
     }
 
     private async Task<AtProtoRecord<PopfeedListItemRecord>?> FindExistingListItemAsync(
@@ -380,6 +403,21 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 
     private static PopfeedReviewRecord MergeExistingReview(PopfeedReviewRecord existing, PopfeedReviewRecord desired)
     {
+        // Merge tags by union so we don't lose important tags (e.g., ensure "watched" is present)
+        var mergedTags = new List<string>();
+        if (existing.Tags is not null)
+        {
+            mergedTags.AddRange(existing.Tags);
+        }
+
+        if (desired.Tags is not null)
+        {
+            foreach (var t in desired.Tags)
+            {
+                if (!mergedTags.Contains(t, StringComparer.Ordinal)) mergedTags.Add(t);
+            }
+        }
+
         return new PopfeedReviewRecord
         {
             Title = desired.Title,
@@ -390,7 +428,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             Poster = existing.Poster ?? desired.Poster,
             PosterUrl = existing.PosterUrl ?? desired.PosterUrl,
             ReleaseDate = existing.ReleaseDate ?? desired.ReleaseDate,
-            Tags = existing.Tags.Count > 0 ? existing.Tags : desired.Tags,
+            Tags = mergedTags,
             Facets = existing.Facets.Count > 0 ? existing.Facets : desired.Facets,
             ContainsSpoilers = existing.ContainsSpoilers,
             IsRevisit = existing.IsRevisit,
@@ -400,12 +438,15 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 
     private static bool NeedsReviewUpdate(PopfeedReviewRecord existing, PopfeedReviewRecord merged)
     {
+        var existingTags = new HashSet<string>(existing.Tags ?? new List<string>(), StringComparer.Ordinal);
+        var mergedTags = new HashSet<string>(merged.Tags ?? new List<string>(), StringComparer.Ordinal);
+
         return !string.Equals(existing.Title, merged.Title, StringComparison.Ordinal)
             || !string.Equals(existing.Text, merged.Text, StringComparison.Ordinal)
             || !string.Equals(existing.PosterUrl, merged.PosterUrl, StringComparison.Ordinal)
             || !string.Equals(existing.ReleaseDate, merged.ReleaseDate, StringComparison.Ordinal)
             || (existing.Poster is null && merged.Poster is not null)
-            || existing.Tags.Count == 0 && merged.Tags.Count > 0;
+            || !existingTags.SetEquals(mergedTags);
     }
 
     private static string? BuildPosterUrl(string did, AtProtoBlob? blob)

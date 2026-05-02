@@ -43,6 +43,16 @@ public sealed class PopfeedUserConfiguration
     public string WatchedListUri { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the cached movie watched-list URI.
+    /// </summary>
+    public string WatchedMovieListUri { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the cached TV watched-list URI.
+    /// </summary>
+    public string WatchedTelevisionListUri { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets a value indicating whether watched items should also be posted as activity to Bluesky.
     /// </summary>
     public bool PostWatchedItemsToBluesky { get; set; }
@@ -60,6 +70,44 @@ public sealed class PopfeedUserConfiguration
     /// "season" posts only when a full season is finished.
     /// </remarks>
     public string BlueskyPostMode { get; set; } = "episode";
+
+    /// <summary>
+    /// Gets the cached watched-list URI for the target Popfeed creative work type.
+    /// </summary>
+    /// <param name="creativeWorkType">The Popfeed creative work type.</param>
+    /// <returns>The cached watched-list URI when available.</returns>
+    public string GetWatchedListUri(string creativeWorkType)
+    {
+        return creativeWorkType switch
+        {
+            "movie" => WatchedMovieListUri,
+            "tv_episode" or "tv_season" or "tv_show" => WatchedTelevisionListUri,
+            _ => WatchedListUri,
+        };
+    }
+
+    /// <summary>
+    /// Stores the cached watched-list URI for the target Popfeed creative work type.
+    /// </summary>
+    /// <param name="creativeWorkType">The Popfeed creative work type.</param>
+    /// <param name="uri">The watched-list URI.</param>
+    public void SetWatchedListUri(string creativeWorkType, string uri)
+    {
+        switch (creativeWorkType)
+        {
+            case "movie":
+                WatchedMovieListUri = uri;
+                break;
+            case "tv_episode":
+            case "tv_season":
+            case "tv_show":
+                WatchedTelevisionListUri = uri;
+                break;
+            default:
+                WatchedListUri = uri;
+                break;
+        }
+    }
 
     /// <summary>
     /// Determines whether the mapping has enough information to sync.
