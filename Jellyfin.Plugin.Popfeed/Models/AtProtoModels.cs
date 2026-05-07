@@ -508,9 +508,12 @@ public sealed class PopfeedIdentifiers
     /// </summary>
     /// <param name="other">The other identifier set.</param>
     /// <returns><see langword="true"/> when the identifiers match.</returns>
-    public bool Matches(PopfeedIdentifiers other)
+    public bool Matches(PopfeedIdentifiers? other)
     {
-        ArgumentNullException.ThrowIfNull(other);
+        if (other is null)
+        {
+            return false;
+        }
 
         return string.Equals(ImdbId, other.ImdbId, StringComparison.OrdinalIgnoreCase)
             && string.Equals(TmdbId, other.TmdbId, StringComparison.OrdinalIgnoreCase)
