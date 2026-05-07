@@ -65,7 +65,8 @@ public sealed class PopfeedAtProtoClient
         using var response = await client.PostAsJsonAsync(CreateSessionPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         LogVerbose("ATProto session created successfully for identifier {Identifier}.", userConfiguration.Identifier);
-        return (await response.Content.ReadFromJsonAsync<AtProtoSessionResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false))!;
+        var session = await response.Content.ReadFromJsonAsync<AtProtoSessionResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        return session ?? throw new InvalidOperationException("Empty session response.");
     }
 
     /// <summary>
@@ -103,7 +104,8 @@ public sealed class PopfeedAtProtoClient
         LogVerbose("Listing ATProto records in collection {Collection} from {ServiceUrl}.", collection, serviceUrl);
         using var response = await client.GetAsync(uriBuilder.ToString(), cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-        return (await response.Content.ReadFromJsonAsync<AtProtoListRecordsResponse<TRecord>>(_jsonOptions, cancellationToken).ConfigureAwait(false))!;
+        var body = await response.Content.ReadFromJsonAsync<AtProtoListRecordsResponse<TRecord>>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        return body ?? throw new InvalidOperationException("Empty response from listRecords.");
     }
 
     /// <summary>
@@ -139,7 +141,8 @@ public sealed class PopfeedAtProtoClient
         using var response = await client.PostAsJsonAsync(CreateRecordPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         LogVerbose("Created ATProto record in collection {Collection} on {ServiceUrl}.", collection, serviceUrl);
-        return (await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false))!;
+        var createResult = await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        return createResult ?? throw new InvalidOperationException("Empty create record response.");
     }
 
     /// <summary>
@@ -178,7 +181,8 @@ public sealed class PopfeedAtProtoClient
         using var response = await client.PostAsJsonAsync(PutRecordPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         LogVerbose("Updated ATProto record in collection {Collection} on {ServiceUrl}.", collection, serviceUrl);
-        return (await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false))!;
+        var updateResult = await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+        return updateResult ?? throw new InvalidOperationException("Empty put record response.");
     }
 
     /// <summary>
@@ -203,7 +207,7 @@ public sealed class PopfeedAtProtoClient
         using var response = await client.PostAsync(UploadBlobPath, content, cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         var payload = await response.Content.ReadFromJsonAsync<AtProtoUploadBlobResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
-        return payload!.Blob;
+        return payload?.Blob ?? throw new InvalidOperationException("Empty upload blob response.");
     }
 
     /// <summary>
