@@ -194,7 +194,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         do
         {
             var page = await _client.ListRecordsAsync<PopfeedListRecord>(userConfiguration.PdsUrl, session, ListCollection, cursor, cancellationToken).ConfigureAwait(false);
-            var existing = page.Records.FirstOrDefault(record => string.Equals(record.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
+            var existing = page.Records.FirstOrDefault(record => record.Value is not null && string.Equals(record.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {
                 userConfiguration.SetWatchedListUri(creativeWorkType, existing.Uri);
@@ -251,7 +251,8 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         {
             var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(userConfiguration.PdsUrl, session, ListItemCollection, cursor, cancellationToken).ConfigureAwait(false);
             var match = page.Records.FirstOrDefault(record =>
-                string.Equals(record.Value.ListUri, watchedListUri, StringComparison.Ordinal)
+                record.Value is not null
+                && string.Equals(record.Value.ListUri, watchedListUri, StringComparison.Ordinal)
                 && record.Value.Identifiers.Matches(identifiers));
 
             if (match is not null)
@@ -278,7 +279,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         {
             var page = await _client.ListRecordsAsync<PopfeedReviewRecord>(userConfiguration.PdsUrl, session, ReviewCollection, cursor, cancellationToken).ConfigureAwait(false);
             var match = page.Records.FirstOrDefault(record =>
-                record.Value.Identifiers.Matches(identifiers));
+                record.Value?.Identifiers is not null && record.Value.Identifiers.Matches(identifiers));
 
             if (match is not null)
             {
