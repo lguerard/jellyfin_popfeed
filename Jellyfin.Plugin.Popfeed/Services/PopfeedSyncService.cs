@@ -124,11 +124,12 @@ public sealed class PopfeedSyncService
 
         if (item is Season season && season.Series is not null && season.IndexNumber.HasValue)
         {
+            var tmdbTvSeriesId = GetProviderId(season.Series, MetadataProvider.Tmdb);
             var identifiers = new PopfeedIdentifiers
             {
-                ImdbId = GetProviderId(season, MetadataProvider.Imdb),
-                TmdbId = GetProviderId(season, MetadataProvider.Tmdb),
-                TmdbTvSeriesId = GetProviderId(season.Series, MetadataProvider.Tmdb),
+                ImdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId) ? GetProviderId(season, MetadataProvider.Imdb) : null,
+                TmdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId) ? GetProviderId(season, MetadataProvider.Tmdb) : null,
+                TmdbTvSeriesId = tmdbTvSeriesId,
                 SeasonNumber = season.IndexNumber,
             };
 
@@ -142,11 +143,12 @@ public sealed class PopfeedSyncService
 
         if (item is Episode episode && episode.Series is not null && episode.IndexNumber.HasValue)
         {
+            var tmdbTvSeriesId = GetProviderId(episode.Series, MetadataProvider.Tmdb);
             var identifiers = new PopfeedIdentifiers
             {
-                ImdbId = GetProviderId(episode, MetadataProvider.Imdb),
-                TmdbId = GetProviderId(episode, MetadataProvider.Tmdb),
-                TmdbTvSeriesId = GetProviderId(episode.Series, MetadataProvider.Tmdb),
+                ImdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId) ? GetProviderId(episode, MetadataProvider.Imdb) : null,
+                TmdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId) ? GetProviderId(episode, MetadataProvider.Tmdb) : null,
+                TmdbTvSeriesId = tmdbTvSeriesId,
                 SeasonNumber = episode.ParentIndexNumber,
                 EpisodeNumber = episode.IndexNumber,
             };
@@ -303,9 +305,16 @@ public sealed class PopfeedSyncService
                     {
                         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
                         var reviewUrl = activityResult is null ? null : BuildPopfeedReviewUrl(activityResult.Uri, session.Handle);
-                        var post = BuildBlueskyPost(item, userConfiguration.BlueskyPostLanguage, activityText, reviewUrl, activityResult?.Record.Poster, timestamp);
-
-                        var createdPost = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
+                        var createdPost = await CreateBlueskyPostAsync(
+                            userConfiguration,
+                            session,
+                            item,
+                            userConfiguration.BlueskyPostLanguage,
+                            activityText,
+                            reviewUrl,
+                            activityResult?.Record.Poster,
+                            timestamp,
+                            cancellationToken).ConfigureAwait(false);
                         result.PostedToBluesky = true;
 
                         if (activityResult is not null)
@@ -512,6 +521,31 @@ public sealed class PopfeedSyncService
         }
 
         return post;
+    }
+
+    private async Task<AtProtoCreateRecordResponse> CreateBlueskyPostAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        BaseItem item,
+        string languageCode,
+        string activityText,
+        string? reviewUrl,
+        AtProtoBlob? thumb,
+        DateTimeOffset timestamp,
+        CancellationToken cancellationToken)
+    {
+        var post = BuildBlueskyPost(item, languageCode, activityText, reviewUrl, thumb, timestamp);
+
+        try
+        {
+            return await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!string.IsNullOrWhiteSpace(reviewUrl) || thumb is not null)
+        {
+            _logger.LogWarning(ex, "Retrying Bluesky post for {ItemName} without Popfeed embed metadata.", item.Name);
+            var fallbackPost = BuildBlueskyPost(item, languageCode, activityText, null, null, timestamp);
+            return await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, fallbackPost, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static string BuildExternalEmbedTitle(BaseItem item, string languageCode)

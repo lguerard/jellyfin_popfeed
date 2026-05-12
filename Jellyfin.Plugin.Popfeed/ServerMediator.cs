@@ -70,6 +70,12 @@ public sealed class ServerMediator : IHostedService
                 return;
             }
 
+            if (isWatching)
+            {
+                LogVerbose("Ignoring user data save event for {ItemName} because playback is still in progress and not marked watched by Jellyfin.", eventArgs.Item.Name);
+                return;
+            }
+
             if (eventArgs.Item is not Movie && eventArgs.Item is not Episode)
             {
                 LogVerbose("Ignoring item {ItemName} because only movies and episodes are supported.", eventArgs.Item.Name);
@@ -94,10 +100,10 @@ public sealed class ServerMediator : IHostedService
                 eventArgs.SaveReason,
                 eventArgs.UserId,
                 isPlayed,
-                isWatching,
+                false,
                 playedAt);
 
-            await _syncService.SyncPlaystateAsync(eventArgs.UserId, eventArgs.Item, isPlayed, isWatching, playedAt, CancellationToken.None).ConfigureAwait(false);
+            await _syncService.SyncPlaystateAsync(eventArgs.UserId, eventArgs.Item, isPlayed, false, playedAt, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
