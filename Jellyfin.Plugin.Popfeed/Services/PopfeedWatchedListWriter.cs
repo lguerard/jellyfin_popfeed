@@ -63,7 +63,9 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         if (played || inProgress)
         {
             var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-            var desiredStatus = played ? "finished" : "watching";
+            var desiredStatus = played
+                ? PopfeedListItemRecord.FinishedStatus
+                : PopfeedListItemRecord.InProgressStatus;
             if (existingListItem is null)
             {
                 var listItemRecord = new PopfeedListItemRecord
@@ -316,6 +318,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         {
             Title = BuildActivityTitle(item, title),
             Text = activityText,
+            Rating = 5,
             Identifiers = mappedItem.Identifiers,
             CreativeWorkType = mappedItem.CreativeWorkType,
             CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),

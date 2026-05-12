@@ -173,6 +173,16 @@ public sealed class PopfeedListRecord
 public sealed class PopfeedListItemRecord
 {
     /// <summary>
+    /// Finished list item status value defined by Popfeed.
+    /// </summary>
+    public const string FinishedStatus = "#finished";
+
+    /// <summary>
+    /// In-progress list item status value defined by Popfeed.
+    /// </summary>
+    public const string InProgressStatus = "#in_progress";
+
+    /// <summary>
     /// Gets or sets the type discriminator.
     /// </summary>
     [JsonPropertyName("$type")]
@@ -196,7 +206,7 @@ public sealed class PopfeedListItemRecord
     /// <summary>
     /// Gets or sets the status.
     /// </summary>
-    public string Status { get; set; } = "finished";
+    public string Status { get; set; } = FinishedStatus;
 
     /// <summary>
     /// Gets or sets the timestamp when the item was added.
@@ -239,6 +249,11 @@ public sealed class PopfeedReviewRecord
     /// Gets or sets the activity text.
     /// </summary>
     public string Text { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the Popfeed rating. Watched-sync activity uses a neutral midpoint.
+    /// </summary>
+    public int Rating { get; set; } = 5;
 
     /// <summary>
     /// Gets or sets the identifiers.
@@ -515,10 +530,52 @@ public sealed class PopfeedIdentifiers
             return false;
         }
 
-        return string.Equals(ImdbId, other.ImdbId, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(TmdbId, other.TmdbId, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(TmdbTvSeriesId, other.TmdbTvSeriesId, StringComparison.OrdinalIgnoreCase)
+        if (HasCanonicalTvShape(this) && HasCanonicalTvShape(other))
+        {
+            return string.Equals(TmdbTvSeriesId, other.TmdbTvSeriesId, StringComparison.OrdinalIgnoreCase)
+                && SeasonNumber == other.SeasonNumber
+                && EpisodeNumber == other.EpisodeNumber;
+        }
+
+        if (IdentifiersMatch(ImdbId, other.ImdbId) && HasMatchingEpisodeShape(other))
+        {
+            return true;
+        }
+
+        if (IdentifiersMatch(TmdbId, other.TmdbId) && HasMatchingEpisodeShape(other))
+        {
+            return true;
+        }
+
+        return BothBlank(ImdbId, other.ImdbId)
+            && BothBlank(TmdbId, other.TmdbId)
+            && BothBlank(TmdbTvSeriesId, other.TmdbTvSeriesId)
             && SeasonNumber == other.SeasonNumber
             && EpisodeNumber == other.EpisodeNumber;
+    }
+
+    private static bool HasCanonicalTvShape(PopfeedIdentifiers identifiers)
+    {
+        return !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            && identifiers.SeasonNumber.HasValue;
+    }
+
+    private bool HasMatchingEpisodeShape(PopfeedIdentifiers other)
+    {
+        return SeasonNumber == other.SeasonNumber
+            && EpisodeNumber == other.EpisodeNumber;
+    }
+
+    private static bool IdentifiersMatch(string? left, string? right)
+    {
+        return !string.IsNullOrWhiteSpace(left)
+            && !string.IsNullOrWhiteSpace(right)
+            && string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool BothBlank(string? left, string? right)
+    {
+        return string.IsNullOrWhiteSpace(left)
+            && string.IsNullOrWhiteSpace(right);
     }
 }
