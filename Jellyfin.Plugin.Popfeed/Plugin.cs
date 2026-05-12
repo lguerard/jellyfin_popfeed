@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -71,10 +72,42 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
                 return;
             }
 
-            var remainingDirectories = new List<string>();
-            foreach (var directory in pluginsRoot.EnumerateDirectories("Popfeed_*"))
+            var currentVersion = GetCurrentPluginVersion();
+            var directoryPrefixes = GetPluginDirectoryPrefixes();
+            var candidateDirectories = new Collection<DirectoryInfo>();
+
+            foreach (var prefix in directoryPrefixes)
             {
-                if (string.Equals(directory.FullName, currentDirectory, StringComparison.OrdinalIgnoreCase))
+                foreach (var directory in pluginsRoot.EnumerateDirectories(prefix + "_*"))
+                {
+                    if (candidateDirectories.Any(existing => string.Equals(existing.FullName, directory.FullName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    candidateDirectories.Add(directory);
+                }
+            }
+
+            var parsedVersions = candidateDirectories
+                .Select(directory => new PluginDirectoryVersion(directory, TryParseDirectoryVersion(directory.Name, directoryPrefixes)))
+                .Where(entry => entry.Version is not null)
+                .ToArray();
+
+            if (parsedVersions.Length == 0)
+            {
+                return;
+            }
+
+            var highestInstalledVersion = parsedVersions.Max(entry => entry.Version)!;
+
+            var remainingDirectories = new List<string>();
+            foreach (var directory in candidateDirectories)
+            {
+                var shouldDeleteCurrentDirectory = string.Equals(directory.FullName, currentDirectory, StringComparison.OrdinalIgnoreCase)
+                    && currentVersion < highestInstalledVersion;
+
+                if (!shouldDeleteCurrentDirectory && !ShouldDeleteDirectory(directory.Name, directoryPrefixes, highestInstalledVersion))
                 {
                     continue;
                 }
@@ -100,6 +133,63 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         {
         }
     }
+
+    private Version GetCurrentPluginVersion()
+    {
+        return GetType().Assembly.GetName().Version ?? new Version(0, 0, 0, 0);
+    }
+
+    private string[] GetPluginDirectoryPrefixes()
+    {
+        return new[]
+        {
+            Name,
+            GetType().Assembly.GetName().Name ?? Name,
+        }
+            .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static Version? TryParseDirectoryVersion(string directoryName, IReadOnlyCollection<string> prefixes)
+    {
+        foreach (var prefix in prefixes)
+        {
+            var expectedPrefix = prefix + "_";
+            if (!directoryName.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var versionSuffix = directoryName[expectedPrefix.Length..];
+            if (!Version.TryParse(versionSuffix, out var directoryVersion))
+            {
+                return null;
+            }
+
+            return directoryVersion;
+        }
+
+        return null;
+    }
+
+    private static bool ShouldDeleteDirectory(string directoryName, IReadOnlyCollection<string> prefixes, Version highestInstalledVersion)
+    {
+        var directoryVersion = TryParseDirectoryVersion(directoryName, prefixes);
+        if (directoryVersion is null)
+        {
+            return false;
+        }
+
+        if (directoryVersion < highestInstalledVersion)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private sealed record PluginDirectoryVersion(DirectoryInfo Directory, Version? Version);
 
     private static bool TryDeleteDirectory(string directoryPath)
     {
