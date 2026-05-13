@@ -97,6 +97,85 @@ function Get-BuildBlockValue {
     throw "Missing block '$Key' in build.yaml."
 }
 
+function Resolve-ReleaseGitReference {
+    param([string]$RawVersion)
+
+    $trimmedVersion = $RawVersion.Trim()
+    $candidateTags = @($trimmedVersion)
+    if (-not $trimmedVersion.StartsWith('v', [StringComparison]::OrdinalIgnoreCase)) {
+        $candidateTags += "v$trimmedVersion"
+    }
+
+    foreach ($candidateTag in ($candidateTags | Select-Object -Unique)) {
+        & git rev-parse --verify --quiet "refs/tags/$candidateTag" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return $candidateTag
+        }
+    }
+
+    return 'HEAD'
+}
+
+function Try-GetPreviousReleaseTag {
+    param([string]$Reference)
+
+    $describeTarget = if ($Reference -eq 'HEAD') { 'HEAD' } else { "$Reference^" }
+    $previousTag = & git describe --tags --abbrev=0 $describeTarget 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $previousTag) {
+        return $null
+    }
+
+    return (@($previousTag) | Select-Object -First 1).Trim()
+}
+
+function Get-ReleaseCommitSubjects {
+    param(
+        [string]$Reference,
+        [string]$PreviousTag,
+        [switch]$IncludeMergeCommits
+    )
+
+    $arguments = @('log', '--format=%s', '--reverse')
+    if (-not $IncludeMergeCommits) {
+        $arguments += '--no-merges'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PreviousTag)) {
+        $arguments += $Reference
+    } else {
+        $arguments += "$PreviousTag..$Reference"
+    }
+
+    $subjects = & git @arguments 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $subjects) {
+        return @()
+    }
+
+    return @($subjects | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+function Get-ReleaseChangelog {
+    param([string]$RawVersion, [string]$FallbackChangelog)
+
+    if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+        return $FallbackChangelog
+    }
+
+    $reference = Resolve-ReleaseGitReference -RawVersion $RawVersion
+    $previousTag = Try-GetPreviousReleaseTag -Reference $reference
+
+    $subjects = Get-ReleaseCommitSubjects -Reference $reference -PreviousTag $previousTag
+    if ($subjects.Count -eq 0) {
+        $subjects = Get-ReleaseCommitSubjects -Reference $reference -PreviousTag $previousTag -IncludeMergeCommits
+    }
+
+    if ($subjects.Count -eq 0) {
+        return $FallbackChangelog
+    }
+
+    return ($subjects | ForEach-Object { "- $_" }) -join [Environment]::NewLine
+}
+
 function Get-BuildArtifacts {
     $artifacts = @()
     $inArtifacts = $false
@@ -134,6 +213,9 @@ if ($informationalVersion.StartsWith('v', [StringComparison]::OrdinalIgnoreCase)
     $informationalVersion = $informationalVersion.Substring(1)
 }
 
+$fallbackChangelog = Get-BuildBlockValue -Key 'changelog'
+$releaseChangelog = Get-ReleaseChangelog -RawVersion $Version -FallbackChangelog $fallbackChangelog
+
 if (-not $ManifestOutputPath) {
     $ManifestOutputPath = Join-Path $artifactsRoot "manifest.json"
 }
@@ -162,7 +244,7 @@ foreach ($packageFile in $packageFiles) {
 
 $pluginMeta = [ordered]@{
     category = Get-BuildScalarValue -Key 'category'
-    changelog = Get-BuildBlockValue -Key 'changelog'
+    changelog = $releaseChangelog
     description = Get-BuildBlockValue -Key 'description'
     guid = Get-BuildScalarValue -Key 'guid'
     name = Get-BuildScalarValue -Key 'name'
@@ -184,7 +266,7 @@ Compress-Archive -Path (Join-Path $packageRoot "*") -DestinationPath $zipPath
 
 if ($ManifestSourceUrl) {
     $checksum = (Get-FileHash -Path $zipPath -Algorithm MD5).Hash.ToLowerInvariant()
-    & (Join-Path $PSScriptRoot "generate-manifest.ps1") -Version $Version -SourceUrl $ManifestSourceUrl -Checksum $checksum -OutputPath $ManifestOutputPath
+    & (Join-Path $PSScriptRoot "generate-manifest.ps1") -Version $Version -SourceUrl $ManifestSourceUrl -Checksum $checksum -OutputPath $ManifestOutputPath -Changelog $releaseChangelog
 }
 
 Write-Host "Created release package: $zipPath"

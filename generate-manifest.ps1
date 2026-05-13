@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Checksum,
     [string]$OutputPath = "",
+    [string]$Changelog = "",
     [datetime]$Timestamp = (Get-Date).ToUniversalTime()
 )
 
@@ -79,6 +80,85 @@ function Get-BlockValue {
     throw "Missing block '$Key' in build.yaml."
 }
 
+function Resolve-ReleaseGitReference {
+    param([string]$RawVersion)
+
+    $trimmedVersion = $RawVersion.Trim()
+    $candidateTags = @($trimmedVersion)
+    if (-not $trimmedVersion.StartsWith('v', [StringComparison]::OrdinalIgnoreCase)) {
+        $candidateTags += "v$trimmedVersion"
+    }
+
+    foreach ($candidateTag in ($candidateTags | Select-Object -Unique)) {
+        & git rev-parse --verify --quiet "refs/tags/$candidateTag" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return $candidateTag
+        }
+    }
+
+    return 'HEAD'
+}
+
+function Try-GetPreviousReleaseTag {
+    param([string]$Reference)
+
+    $describeTarget = if ($Reference -eq 'HEAD') { 'HEAD' } else { "$Reference^" }
+    $previousTag = & git describe --tags --abbrev=0 $describeTarget 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $previousTag) {
+        return $null
+    }
+
+    return (@($previousTag) | Select-Object -First 1).Trim()
+}
+
+function Get-ReleaseCommitSubjects {
+    param(
+        [string]$Reference,
+        [string]$PreviousTag,
+        [switch]$IncludeMergeCommits
+    )
+
+    $arguments = @('log', '--format=%s', '--reverse')
+    if (-not $IncludeMergeCommits) {
+        $arguments += '--no-merges'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PreviousTag)) {
+        $arguments += $Reference
+    } else {
+        $arguments += "$PreviousTag..$Reference"
+    }
+
+    $subjects = & git @arguments 2>$null
+    if ($LASTEXITCODE -ne 0 -or $null -eq $subjects) {
+        return @()
+    }
+
+    return @($subjects | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+function Get-ReleaseChangelog {
+    param([string]$RawVersion, [string]$FallbackChangelog)
+
+    if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+        return $FallbackChangelog
+    }
+
+    $reference = Resolve-ReleaseGitReference -RawVersion $RawVersion
+    $previousTag = Try-GetPreviousReleaseTag -Reference $reference
+
+    $subjects = Get-ReleaseCommitSubjects -Reference $reference -PreviousTag $previousTag
+    if ($subjects.Count -eq 0) {
+        $subjects = Get-ReleaseCommitSubjects -Reference $reference -PreviousTag $previousTag -IncludeMergeCommits
+    }
+
+    if ($subjects.Count -eq 0) {
+        return $FallbackChangelog
+    }
+
+    return ($subjects | ForEach-Object { "- $_" }) -join [Environment]::NewLine
+}
+
 function Normalize-Version {
     param([string]$RawVersion)
 
@@ -95,6 +175,11 @@ function Normalize-Version {
     return ($parts[0..3] -join '.')
 }
 
+$fallbackChangelog = Get-BlockValue -Key 'changelog'
+if ([string]::IsNullOrWhiteSpace($Changelog)) {
+    $Changelog = Get-ReleaseChangelog -RawVersion $Version -FallbackChangelog $fallbackChangelog
+}
+
 $manifest = @(
     [ordered]@{
         guid = Get-ScalarValue -Key 'guid'
@@ -106,7 +191,7 @@ $manifest = @(
         versions = @(
             [ordered]@{
                 version = Normalize-Version -RawVersion $Version
-                changelog = Get-BlockValue -Key 'changelog'
+                changelog = $Changelog
                 targetAbi = Get-ScalarValue -Key 'targetAbi'
                 sourceUrl = $SourceUrl
                 checksum = $Checksum.ToLowerInvariant()
