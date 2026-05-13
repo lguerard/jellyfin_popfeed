@@ -82,7 +82,8 @@ Before publishing it, verify that the file starts with `[` and therefore contain
 The manifest metadata is derived from `build.yaml`, and the generated version entry contains:
 
 - the normalized plugin version
-- the changelog from `build.yaml`
+- the changelog built from git commit titles since the previous reachable
+  release tag
 - the target Jellyfin ABI
 - the release ZIP download URL
 - the ZIP MD5 checksum
@@ -127,6 +128,8 @@ Prereleases do not update the stable repository manifest.
 
 ## Notes For Contributors
 
-- Keep `build.yaml` in sync with user-facing plugin metadata and changelog text.
+- Keep `build.yaml` in sync with user-facing plugin metadata. Its
+  `changelog` block is only used as a fallback when git history is unavailable
+  during packaging.
 - Prefer release tags that start with `v` because both the workflow trigger and current packaging examples assume that format.
 - If the GitHub release step fails with a permissions error, check repository or organization Actions settings for read and write workflow token permissions.
