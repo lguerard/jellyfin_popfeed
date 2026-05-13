@@ -84,13 +84,12 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             }
             else if (existingListItem is not null)
             {
-                var needsUpdate = !string.Equals(existingListItem.Value.Status, desiredStatus, StringComparison.Ordinal)
-                    || !string.Equals(existingListItem.Value.Title, title, StringComparison.Ordinal)
-                    || (played && existingListItem.Value.CompletedAt is null)
-                    || (!played && existingListItem.Value.CompletedAt is not null);
+                var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played);
 
                 if (needsUpdate)
                 {
+                    existingListItem.Value.Identifiers = mappedItem.Identifiers;
+                    existingListItem.Value.CreativeWorkType = mappedItem.CreativeWorkType;
                     existingListItem.Value.Status = desiredStatus;
                     existingListItem.Value.Title = title;
                     existingListItem.Value.CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null;
@@ -176,6 +175,21 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         }
 
         return null;
+    }
+
+    internal static bool NeedsListItemUpdate(
+        PopfeedListItemRecord existing,
+        PopfeedMappedItem mappedItem,
+        string desiredStatus,
+        string title,
+        bool played)
+    {
+        return !string.Equals(existing.Status, desiredStatus, StringComparison.Ordinal)
+            || !string.Equals(existing.Title, title, StringComparison.Ordinal)
+            || !existing.Identifiers.HasSameValues(mappedItem.Identifiers)
+            || !string.Equals(existing.CreativeWorkType, mappedItem.CreativeWorkType, StringComparison.Ordinal)
+            || (played && existing.CompletedAt is null)
+            || (!played && existing.CompletedAt is not null);
     }
 
     private async Task<string> EnsureWatchedListAsync(
@@ -405,7 +419,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
     }
 
-    private static PopfeedReviewRecord MergeExistingReview(PopfeedReviewRecord existing, PopfeedReviewRecord desired)
+    internal static PopfeedReviewRecord MergeExistingReview(PopfeedReviewRecord existing, PopfeedReviewRecord desired)
     {
         // Merge tags by union so we don't lose important tags (e.g., ensure "watched" is present)
         var mergedTags = new List<string>();
@@ -440,13 +454,15 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
     }
 
-    private static bool NeedsReviewUpdate(PopfeedReviewRecord existing, PopfeedReviewRecord merged)
+    internal static bool NeedsReviewUpdate(PopfeedReviewRecord existing, PopfeedReviewRecord merged)
     {
         var existingTags = new HashSet<string>(existing.Tags ?? new List<string>(), StringComparer.Ordinal);
         var mergedTags = new HashSet<string>(merged.Tags ?? new List<string>(), StringComparer.Ordinal);
 
         return !string.Equals(existing.Title, merged.Title, StringComparison.Ordinal)
             || !string.Equals(existing.Text, merged.Text, StringComparison.Ordinal)
+            || !existing.Identifiers.HasSameValues(merged.Identifiers)
+            || !string.Equals(existing.CreativeWorkType, merged.CreativeWorkType, StringComparison.Ordinal)
             || !string.Equals(existing.PosterUrl, merged.PosterUrl, StringComparison.Ordinal)
             || !string.Equals(existing.ReleaseDate, merged.ReleaseDate, StringComparison.Ordinal)
             || (existing.Poster is null && merged.Poster is not null)

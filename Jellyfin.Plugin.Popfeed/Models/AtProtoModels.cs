@@ -537,6 +537,20 @@ public sealed class PopfeedIdentifiers
                 && EpisodeNumber == other.EpisodeNumber;
         }
 
+        if (HasCanonicalEpisodeShape(this) && HasLegacyEpisodeShape(other))
+        {
+            return string.Equals(TmdbTvSeriesId, other.TmdbId, StringComparison.OrdinalIgnoreCase)
+                && SeasonNumber == other.SeasonNumber
+                && EpisodeNumber == other.EpisodeNumber;
+        }
+
+        if (HasLegacyEpisodeShape(this) && HasCanonicalEpisodeShape(other))
+        {
+            return string.Equals(TmdbId, other.TmdbTvSeriesId, StringComparison.OrdinalIgnoreCase)
+                && SeasonNumber == other.SeasonNumber
+                && EpisodeNumber == other.EpisodeNumber;
+        }
+
         if (IdentifiersMatch(ImdbId, other.ImdbId) && HasMatchingEpisodeShape(other))
         {
             return true;
@@ -554,10 +568,43 @@ public sealed class PopfeedIdentifiers
             && EpisodeNumber == other.EpisodeNumber;
     }
 
+    /// <summary>
+    /// Determines whether two identifier objects contain the same serialized values.
+    /// </summary>
+    /// <param name="other">The other identifier set.</param>
+    /// <returns><see langword="true"/> when all identifier fields are equal.</returns>
+    public bool HasSameValues(PopfeedIdentifiers? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        return StringValueEquals(ImdbId, other.ImdbId)
+            && StringValueEquals(TmdbId, other.TmdbId)
+            && StringValueEquals(TmdbTvSeriesId, other.TmdbTvSeriesId)
+            && SeasonNumber == other.SeasonNumber
+            && EpisodeNumber == other.EpisodeNumber;
+    }
+
     private static bool HasCanonicalTvShape(PopfeedIdentifiers identifiers)
     {
         return !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
             && identifiers.SeasonNumber.HasValue;
+    }
+
+    private static bool HasCanonicalEpisodeShape(PopfeedIdentifiers identifiers)
+    {
+        return !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            && identifiers.SeasonNumber.HasValue
+            && identifiers.EpisodeNumber.HasValue;
+    }
+
+    private static bool HasLegacyEpisodeShape(PopfeedIdentifiers identifiers)
+    {
+        return !string.IsNullOrWhiteSpace(identifiers.TmdbId)
+            && identifiers.SeasonNumber.HasValue
+            && identifiers.EpisodeNumber.HasValue;
     }
 
     private bool HasMatchingEpisodeShape(PopfeedIdentifiers other)
@@ -577,5 +624,11 @@ public sealed class PopfeedIdentifiers
     {
         return string.IsNullOrWhiteSpace(left)
             && string.IsNullOrWhiteSpace(right);
+    }
+
+    private static bool StringValueEquals(string? left, string? right)
+    {
+        return BothBlank(left, right)
+            || string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
     }
 }
