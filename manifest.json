@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.3.3.0",
+        "changelog": "- fix(sync): 🐛 correct Popfeed item links",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.3.3/Jellyfin.Plugin.Popfeed-v0.3.3.zip",
+        "checksum": "4d47fd66d0fd40bd37032c2fe4945c29",
+        "timestamp": "2026-05-14T18:50:45.4965862Z"
+      },
+      {
         "version": "0.3.2.0",
         "changelog": "- build(release): 🏗️ derive manifest changelog from git history\r\n- docs(agents): 📝 require approval before main merge",
         "targetAbi": "10.11.0.0",
