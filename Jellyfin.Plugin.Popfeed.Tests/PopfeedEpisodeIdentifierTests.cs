@@ -176,4 +176,54 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.True(PopfeedWatchedListWriter.NeedsReviewUpdate(existing, merged));
         Assert.True(merged.Identifiers.HasSameValues(desired.Identifiers));
     }
+
+    [Fact]
+    public void BuildPopfeedItemUrl_UsesMoviePath()
+    {
+        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(
+            new PopfeedMappedItem(
+                "movie",
+                new PopfeedIdentifiers
+                {
+                    TmdbId = "502356",
+                }));
+
+        Assert.Equal(
+            "https://popfeed.social/movie/502356",
+            itemUrl);
+    }
+
+    [Fact]
+    public void BuildPopfeedItemUrl_UsesCanonicalEpisodePath()
+    {
+        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(
+            new PopfeedMappedItem(
+                "tv_episode",
+                new PopfeedIdentifiers
+                {
+                    TmdbTvSeriesId = "67997",
+                    SeasonNumber = 33,
+                    EpisodeNumber = 22,
+                }));
+
+        Assert.Equal(
+            "https://popfeed.social/episode?tvId=67997&seasonNumber=33&episodeNumber=22",
+            itemUrl);
+    }
+
+    [Fact]
+    public void BuildPopfeedItemUrl_SkipsLegacyEpisodeShape()
+    {
+        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(
+            new PopfeedMappedItem(
+                "tv_episode",
+                new PopfeedIdentifiers
+                {
+                    TmdbId = "67997",
+                    SeasonNumber = 33,
+                    EpisodeNumber = 22,
+                }));
+
+        Assert.Null(itemUrl);
+    }
 }

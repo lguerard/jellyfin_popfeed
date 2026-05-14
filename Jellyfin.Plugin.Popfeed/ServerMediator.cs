@@ -15,6 +15,7 @@ namespace Jellyfin.Plugin.Popfeed;
 /// </summary>
 public sealed class ServerMediator : IHostedService
 {
+    private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private readonly PopfeedSyncService _syncService;
     private readonly ILogger<ServerMediator> _logger;
@@ -22,11 +23,13 @@ public sealed class ServerMediator : IHostedService
     /// <summary>
     /// Initializes a new instance of the <see cref="ServerMediator"/> class.
     /// </summary>
+    /// <param name="libraryManager">The library manager.</param>
     /// <param name="userDataManager">The user data manager.</param>
     /// <param name="syncService">The Popfeed sync service.</param>
     /// <param name="logger">The logger.</param>
-    public ServerMediator(IUserDataManager userDataManager, PopfeedSyncService syncService, ILogger<ServerMediator> logger)
+    public ServerMediator(ILibraryManager libraryManager, IUserDataManager userDataManager, PopfeedSyncService syncService, ILogger<ServerMediator> logger)
     {
+        _libraryManager = libraryManager;
         _userDataManager = userDataManager;
         _syncService = syncService;
         _logger = logger;
@@ -82,10 +85,16 @@ public sealed class ServerMediator : IHostedService
                 return;
             }
 
+            var syncItem = _libraryManager.GetItemById(eventArgs.Item.Id) ?? eventArgs.Item;
+            if (!ReferenceEquals(syncItem, eventArgs.Item))
+            {
+                LogVerbose("Rehydrated library item {ItemName} ({ItemId}) before Popfeed sync.", syncItem.Name, syncItem.Id);
+            }
+
             var configuration = Plugin.Instance.Configuration;
             if (!configuration.IsConfigured())
             {
-                LogVerbose("Ignoring item {ItemName} because Popfeed is not configured.", eventArgs.Item.Name);
+                LogVerbose("Ignoring item {ItemName} because Popfeed is not configured.", syncItem.Name);
                 return;
             }
 
@@ -96,14 +105,14 @@ public sealed class ServerMediator : IHostedService
 
             LogVerbose(
                 "Received user data save event for {ItemName}. SaveReason={SaveReason}, UserId={UserId}, Played={Played}, InProgress={InProgress}, PlayedAt={PlayedAt}",
-                eventArgs.Item.Name,
+                syncItem.Name,
                 eventArgs.SaveReason,
                 eventArgs.UserId,
                 isPlayed,
                 false,
                 playedAt);
 
-            await _syncService.SyncPlaystateAsync(eventArgs.UserId, eventArgs.Item, isPlayed, false, playedAt, CancellationToken.None).ConfigureAwait(false);
+            await _syncService.SyncPlaystateAsync(eventArgs.UserId, syncItem, isPlayed, false, playedAt, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
