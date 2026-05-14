@@ -321,14 +321,14 @@ public sealed class PopfeedSyncService
                     try
                     {
                         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-                        var reviewUrl = activityResult is null ? null : BuildPopfeedReviewUrl(activityResult.Uri, session.Handle);
+                        var popfeedItemUrl = BuildPopfeedItemUrl(mapped);
                         var createdPost = await CreateBlueskyPostAsync(
                             userConfiguration,
                             session,
                             item,
                             userConfiguration.BlueskyPostLanguage,
                             activityText,
-                            reviewUrl,
+                            popfeedItemUrl,
                             activityResult?.Record.Poster,
                             timestamp,
                             cancellationToken).ConfigureAwait(false);
@@ -490,14 +490,14 @@ public sealed class PopfeedSyncService
         BaseItem item,
         string languageCode,
         string fallbackActivityText,
-        string? reviewUrl,
+        string? popfeedItemUrl,
         AtProtoBlob? thumb,
         DateTimeOffset timestamp)
     {
         var normalizedLanguage = NormalizeLanguageCode(languageCode);
         var linkLabel = normalizedLanguage == "fr" ? "Voir sur Popfeed" : "Open on Popfeed";
         var text = fallbackActivityText;
-        var postText = string.IsNullOrWhiteSpace(reviewUrl)
+        var postText = string.IsNullOrWhiteSpace(popfeedItemUrl)
             ? text
             : TruncateBlueskyPost(text + "\n\n" + linkLabel);
 
@@ -509,7 +509,7 @@ public sealed class PopfeedSyncService
             Facets = [],
         };
 
-        if (!string.IsNullOrWhiteSpace(reviewUrl))
+        if (!string.IsNullOrWhiteSpace(popfeedItemUrl))
         {
             var linkStart = postText.LastIndexOf(linkLabel, StringComparison.Ordinal);
             if (linkStart >= 0)
@@ -521,7 +521,7 @@ public sealed class PopfeedSyncService
                         ByteStart = GetUtf8ByteCount(postText[..linkStart]),
                         ByteEnd = GetUtf8ByteCount(postText[..(linkStart + linkLabel.Length)]),
                     },
-                    Features = [new BlueskyLinkFacetFeature { Uri = reviewUrl }],
+                    Features = [new BlueskyLinkFacetFeature { Uri = popfeedItemUrl }],
                 });
             }
 
@@ -529,7 +529,7 @@ public sealed class PopfeedSyncService
             {
                 External = new BlueskyExternalObject
                 {
-                    Uri = reviewUrl,
+                    Uri = popfeedItemUrl,
                     Title = BuildExternalEmbedTitle(item, normalizedLanguage),
                     Description = TruncateBlueskyDescription(fallbackActivityText),
                     Thumb = thumb,
@@ -546,18 +546,18 @@ public sealed class PopfeedSyncService
         BaseItem item,
         string languageCode,
         string activityText,
-        string? reviewUrl,
+        string? popfeedItemUrl,
         AtProtoBlob? thumb,
         DateTimeOffset timestamp,
         CancellationToken cancellationToken)
     {
-        var post = BuildBlueskyPost(item, languageCode, activityText, reviewUrl, thumb, timestamp);
+        var post = BuildBlueskyPost(item, languageCode, activityText, popfeedItemUrl, thumb, timestamp);
 
         try
         {
             return await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, BlueskyPostCollection, post, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (!string.IsNullOrWhiteSpace(reviewUrl) || thumb is not null)
+        catch (Exception ex) when (!string.IsNullOrWhiteSpace(popfeedItemUrl) || thumb is not null)
         {
             _logger.LogWarning(ex, "Retrying Bluesky post for {ItemName} without Popfeed embed metadata.", item.Name);
             var fallbackPost = BuildBlueskyPost(item, languageCode, activityText, null, null, timestamp);
@@ -584,12 +584,24 @@ public sealed class PopfeedSyncService
             : text[..(maxDescriptionLength - 1)] + "…";
     }
 
-    private static string BuildPopfeedReviewUrl(string reviewUri, string handle)
+    internal static string? BuildPopfeedItemUrl(PopfeedMappedItem mappedItem)
     {
-        // reviewUri is an AT-URI: at://{did}/{collection}/{rkey}
-        // Popfeed web URL format: https://popfeed.social/profile/{handle}/review/{rkey}
-        var rkey = GetRecordKey(reviewUri);
-        return $"https://popfeed.social/profile/{Uri.EscapeDataString(handle)}/review/{rkey}";
+        ArgumentNullException.ThrowIfNull(mappedItem);
+
+        var identifiers = mappedItem.Identifiers;
+        return mappedItem.CreativeWorkType switch
+        {
+            "movie" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
+                => $"https://popfeed.social/movie/{Uri.EscapeDataString(identifiers.TmdbId)}",
+            "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+                && identifiers.SeasonNumber.HasValue
+                && identifiers.EpisodeNumber.HasValue
+                => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
+            "tv_season" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+                && identifiers.SeasonNumber.HasValue
+                => $"https://popfeed.social/season?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}",
+            _ => null,
+        };
     }
 
     private static int GetUtf8ByteCount(string value)
