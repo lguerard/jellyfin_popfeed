@@ -98,6 +98,15 @@ internal static class PopfeedItemUrlBuilder
         };
     }
 
+    /// <summary>
+    /// Returns <paramref name="preferred"/> when it is non-empty,
+    /// otherwise returns <paramref name="fallback"/> (or null when both are empty).
+    /// Used to promote a legacy <c>TmdbId</c> value when <c>TmdbTvSeriesId</c>
+    /// is absent.
+    /// </summary>
+    /// <param name="preferred">The preferred value (e.g. TmdbTvSeriesId).</param>
+    /// <param name="fallback">The fallback value (e.g. TmdbId).</param>
+    /// <returns>The first non-empty string, or null.</returns>
     private static string? FirstNonEmpty(string? preferred, string? fallback)
     {
         if (!string.IsNullOrWhiteSpace(preferred))

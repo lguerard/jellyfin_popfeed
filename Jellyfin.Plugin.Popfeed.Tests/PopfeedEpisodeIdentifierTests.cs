@@ -5,8 +5,16 @@ using Xunit;
 
 namespace Jellyfin.Plugin.Popfeed.Tests;
 
+/// <summary>
+/// Unit tests covering Popfeed identifier matching, list-item update detection,
+/// episode identifier normalisation, and URL generation.
+/// </summary>
 public sealed class PopfeedEpisodeIdentifierTests
 {
+    /// <summary>
+    /// Two identical movie identifier sets must be considered equal by both
+    /// <see cref="PopfeedIdentifiers.HasSameValues"/> and <see cref="PopfeedIdentifiers.Matches"/>.
+    /// </summary>
     [Fact]
     public void HasSameValues_TreatsMatchingMovieIdentifiersAsEqual()
     {
@@ -26,6 +34,9 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.True(existing.Matches(desired));
     }
 
+    /// <summary>
+    /// An unchanged movie watched-list record must not trigger an unnecessary PDS write.
+    /// </summary>
     [Fact]
     public void NeedsListItemUpdate_DoesNotTriggerForUnchangedMovieIdentifiers()
     {
@@ -60,6 +71,10 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.False(needsUpdate);
     }
 
+    /// <summary>
+    /// Legacy (TmdbId) and canonical (TmdbTvSeriesId) episode identifier shapes
+    /// must match each other for deduplication purposes.
+    /// </summary>
     [Fact]
     public void Matches_TreatsLegacyAndCanonicalEpisodeIdentifiersAsEquivalent()
     {
@@ -81,6 +96,10 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.True(canonical.Matches(legacy));
     }
 
+    /// <summary>
+    /// Legacy and canonical episode identifier shapes must NOT report equal serialised values
+    /// so that an existing legacy record is detected and rewritten to canonical form.
+    /// </summary>
     [Fact]
     public void HasSameValues_DetectsLegacyEpisodeIdentifierShape()
     {
@@ -102,6 +121,10 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.False(canonical.HasSameValues(legacy));
     }
 
+    /// <summary>
+    /// A watched-list item stored with legacy identifiers must be flagged for update
+    /// so its identifiers are rewritten to canonical form on the next sync.
+    /// </summary>
     [Fact]
     public void NeedsListItemUpdate_WhenExistingEpisodeUsesLegacyIdentifiers()
     {
@@ -138,6 +161,10 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.True(needsUpdate);
     }
 
+    /// <summary>
+    /// When a review record carries legacy episode identifiers, the merge result must
+    /// carry canonical identifiers and trigger a PDS update.
+    /// </summary>
     [Fact]
     public void NeedsReviewUpdate_WhenMergedReviewRewritesLegacyEpisodeIdentifiers()
     {
@@ -177,10 +204,14 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.True(merged.Identifiers.HasSameValues(desired.Identifiers));
     }
 
+    /// <summary>
+    /// A movie item with a TMDb id must produce the canonical
+    /// <c>https://popfeed.social/movie/{tmdbId}</c> URL.
+    /// </summary>
     [Fact]
-    public void BuildPopfeedItemUrl_UsesMoviePath()
+    public void BuildItemUrl_UsesMoviePath()
     {
-        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(
+        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(
             new PopfeedMappedItem(
                 "movie",
                 new PopfeedIdentifiers
@@ -193,10 +224,14 @@ public sealed class PopfeedEpisodeIdentifierTests
             itemUrl);
     }
 
+    /// <summary>
+    /// An episode item with canonical identifiers (TmdbTvSeriesId + season + episode) must
+    /// produce the <c>https://popfeed.social/episode?tvId=…</c> URL.
+    /// </summary>
     [Fact]
-    public void BuildPopfeedItemUrl_UsesCanonicalEpisodePath()
+    public void BuildItemUrl_UsesCanonicalEpisodePath()
     {
-        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(
+        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(
             new PopfeedMappedItem(
                 "tv_episode",
                 new PopfeedIdentifiers
@@ -211,10 +246,15 @@ public sealed class PopfeedEpisodeIdentifierTests
             itemUrl);
     }
 
+    /// <summary>
+    /// A legacy episode shape (TmdbId instead of TmdbTvSeriesId) must be automatically
+    /// normalised and produce the correct canonical episode URL.
+    /// Previously the builder returned null for this shape; it now normalises it.
+    /// </summary>
     [Fact]
-    public void BuildPopfeedItemUrl_SkipsLegacyEpisodeShape()
+    public void BuildItemUrl_NormalizesLegacyEpisodeShapeToCanonicalUrl()
     {
-        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(
+        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(
             new PopfeedMappedItem(
                 "tv_episode",
                 new PopfeedIdentifiers
@@ -224,13 +264,20 @@ public sealed class PopfeedEpisodeIdentifierTests
                     EpisodeNumber = 22,
                 }));
 
-        Assert.Null(itemUrl);
+        Assert.Equal(
+            "https://popfeed.social/episode?tvId=67997&seasonNumber=33&episodeNumber=22",
+            itemUrl);
     }
 
+    /// <summary>
+    /// A legacy episode shape (TmdbId) must be rewritten by
+    /// <see cref="PopfeedItemUrlBuilder.NormalizeMappedItem"/> so that
+    /// <c>TmdbTvSeriesId</c> is populated and <c>TmdbId</c> is cleared.
+    /// </summary>
     [Fact]
-    public void NormalizeMappedItemForWatchedUrl_RewritesLegacyEpisodeShape()
+    public void NormalizeMappedItem_RewritesLegacyEpisodeShape()
     {
-        var normalized = PopfeedWatchedListWriter.NormalizeMappedItemForWatchedUrl(
+        var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(
             new PopfeedMappedItem(
                 "tv_episode",
                 new PopfeedIdentifiers
@@ -247,8 +294,13 @@ public sealed class PopfeedEpisodeIdentifierTests
         Assert.Equal(1, normalized.Identifiers.EpisodeNumber);
     }
 
+    /// <summary>
+    /// Normalisation and URL building must both produce the same canonical episode shape
+    /// from a legacy identifier input, confirming that Popfeed scrobbling and Bluesky
+    /// posting resolve the same URL.
+    /// </summary>
     [Fact]
-    public void NormalizeAndBuildPopfeedItemUrl_UseSameCanonicalEpisodeShape()
+    public void NormalizeAndBuildItemUrl_ProduceSameCanonicalEpisodeShape()
     {
         var mapped = new PopfeedMappedItem(
             "tv_episode",
@@ -259,8 +311,8 @@ public sealed class PopfeedEpisodeIdentifierTests
                 EpisodeNumber = 1,
             });
 
-        var normalized = PopfeedWatchedListWriter.NormalizeMappedItemForWatchedUrl(mapped);
-        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(mapped);
+        var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(mapped);
+        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(mapped);
 
         Assert.Equal("4556", normalized.Identifiers.TmdbTvSeriesId);
         Assert.Equal(
@@ -268,10 +320,14 @@ public sealed class PopfeedEpisodeIdentifierTests
             itemUrl);
     }
 
+    /// <summary>
+    /// A legacy season shape (TmdbId instead of TmdbTvSeriesId) must be rewritten
+    /// to canonical form by <see cref="PopfeedItemUrlBuilder.NormalizeMappedItem"/>.
+    /// </summary>
     [Fact]
-    public void NormalizeMappedItemForWatchedUrl_RewritesLegacySeasonShape()
+    public void NormalizeMappedItem_RewritesLegacySeasonShape()
     {
-        var normalized = PopfeedWatchedListWriter.NormalizeMappedItemForWatchedUrl(
+        var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(
             new PopfeedMappedItem(
                 "tv_season",
                 new PopfeedIdentifiers

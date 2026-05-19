@@ -83,12 +83,24 @@ public sealed class PopfeedSyncService
         return _statusStore.GetRecent(jellyfinUserId, limit);
     }
 
+    /// <summary>
+    /// Returns whether the item type is enabled for sync by plugin settings.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="configuration">The plugin configuration.</param>
+    /// <returns><see langword="true"/> when the item type is enabled.</returns>
     private static bool ShouldSyncItem(BaseItem item, PluginConfiguration configuration)
     {
         return (item is Movie && configuration.SyncMovies)
             || (item is Episode && configuration.SyncEpisodes);
     }
 
+    /// <summary>
+    /// Returns whether the item or its parent series is on the manual exclusion list.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="configuration">The plugin configuration.</param>
+    /// <returns><see langword="true"/> when the item is excluded.</returns>
     private static bool IsExcluded(BaseItem item, PluginConfiguration configuration)
     {
         var excludedIds = configuration.GetExcludedItemIds();
@@ -102,11 +114,18 @@ public sealed class PopfeedSyncService
             return true;
         }
 
+        // Also exclude episodes that belong to an excluded series.
         return item is Episode episode
             && episode.Series is not null
             && excludedIds.Contains(episode.Series.Id.ToString());
     }
 
+    /// <summary>
+    /// Maps a Jellyfin media item to a Popfeed identifier payload.
+    /// Returns null when the item has no recognisable external IDs.
+    /// </summary>
+    /// <param name="item">The Jellyfin item to map.</param>
+    /// <returns>The mapped item, or null when no identifiers are available.</returns>
     private static PopfeedMappedItem? MapItem(BaseItem item)
     {
         if (item is Movie movie)
@@ -167,6 +186,12 @@ public sealed class PopfeedSyncService
         return null;
     }
 
+    /// <summary>
+    /// Returns the provider id string for a given metadata provider, or null when absent.
+    /// </summary>
+    /// <param name="item">The item to query.</param>
+    /// <param name="provider">The metadata provider.</param>
+    /// <returns>The id value, or null when not present.</returns>
     private static string? GetProviderId(IHasProviderIds item, MetadataProvider provider)
     {
         return item.TryGetProviderId(provider, out var value) && !string.IsNullOrWhiteSpace(value)
@@ -174,6 +199,12 @@ public sealed class PopfeedSyncService
             : null;
     }
 
+    /// <summary>
+    /// Returns the TMDb series id for an episode, falling back to the episode-level
+    /// TMDb id for libraries that only expose it on the episode rather than the series.
+    /// </summary>
+    /// <param name="episode">The episode.</param>
+    /// <returns>The series TMDb id, or null when unavailable.</returns>
     private static string? GetEpisodeSeriesTmdbId(Episode episode)
     {
         var seriesTmdbId = GetProviderId(episode.Series!, MetadataProvider.Tmdb);
@@ -188,6 +219,13 @@ public sealed class PopfeedSyncService
             : null;
     }
 
+    /// <summary>
+    /// Returns whether a Bluesky post should be created for this sync event.
+    /// In "season" mode, individual episodes are suppressed to avoid post spam.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="userConfiguration">The user configuration.</param>
+    /// <returns><see langword="true"/> when a Bluesky post should be created.</returns>
     private static bool ShouldPostToBluesky(BaseItem item, PopfeedUserConfiguration userConfiguration)
     {
         if (!userConfiguration.PostWatchedItemsToBluesky)
@@ -195,10 +233,25 @@ public sealed class PopfeedSyncService
             return false;
         }
 
+        // In "season" mode, individual episodes are suppressed.
         return !string.Equals(userConfiguration.BlueskyPostMode, "season", StringComparison.OrdinalIgnoreCase)
             || item is not Episode;
     }
 
+    /// <summary>
+    /// Core sync logic shared by both event-driven and test-driven paths.
+    /// Validates configuration, maps identifiers, writes to Popfeed, and
+    /// optionally cross-posts to Bluesky.
+    /// </summary>
+    /// <param name="jellyfinUserId">The Jellyfin user id.</param>
+    /// <param name="item">The media item.</param>
+    /// <param name="played">Whether the item is marked watched.</param>
+    /// <param name="inProgress">Whether playback is currently in progress.</param>
+    /// <param name="playedAt">The watched timestamp.</param>
+    /// <param name="executeRemote">When false, skips all remote writes (dry run).</param>
+    /// <param name="triggerSource">Label written into the status store entry.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A result describing what happened.</returns>
     private async Task<PopfeedSyncTestResult> ExecuteSyncCoreAsync(
         Guid jellyfinUserId,
         BaseItem item,
@@ -272,7 +325,7 @@ public sealed class PopfeedSyncService
         result.CreativeWorkType = mapped.CreativeWorkType;
         result.Identifiers = mapped.Identifiers;
         result.WouldSync = true;
-        var activityText = BuildActivityText(item, userConfiguration.BlueskyPostLanguage, played, inProgress);
+        var activityText = BuildActivityText(item, userConfiguration.BlueskyPostLanguage, played);
         var shouldPostToBluesky = played && userConfiguration.PostWatchedItemsToBluesky && ShouldPostToBluesky(item, userConfiguration);
 
         if (!executeRemote)
@@ -321,7 +374,9 @@ public sealed class PopfeedSyncService
                     try
                     {
                         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-                        var popfeedItemUrl = BuildPopfeedItemUrl(mapped, item);
+                        // Use the shared URL builder; it normalises legacy TmdbId→TmdbTvSeriesId
+                        // before constructing the canonical Popfeed episode/season/movie URL.
+                        var popfeedItemUrl = PopfeedItemUrlBuilder.BuildItemUrl(mapped, item);
                         var createdPost = await CreateBlueskyPostAsync(
                             userConfiguration,
                             session,
@@ -375,6 +430,13 @@ public sealed class PopfeedSyncService
         }
     }
 
+    /// <summary>
+    /// Stamps the result with the trigger source and timestamp, persists it
+    /// to the status store, and returns it.
+    /// </summary>
+    /// <param name="result">The result to finalise.</param>
+    /// <param name="triggerSource">The trigger source label.</param>
+    /// <returns>The finalised result.</returns>
     private PopfeedSyncTestResult CompleteResult(PopfeedSyncTestResult result, string triggerSource)
     {
         result.TriggerSource = triggerSource;
@@ -383,6 +445,13 @@ public sealed class PopfeedSyncService
         return result;
     }
 
+    /// <summary>
+    /// Builds a human-readable dry-run result message for the settings page.
+    /// </summary>
+    /// <param name="played">Whether the item would be marked watched.</param>
+    /// <param name="inProgress">Whether playback is in progress.</param>
+    /// <param name="postToBluesky">Whether a Bluesky post would also be created.</param>
+    /// <returns>The dry-run message.</returns>
     private static string BuildDryRunMessage(bool played, bool inProgress, bool postToBluesky)
     {
         if (played)
@@ -400,6 +469,13 @@ public sealed class PopfeedSyncService
         return "Dry run successful. Matching Popfeed activity would be removed when a plugin-created record exists.";
     }
 
+    /// <summary>
+    /// Builds a human-readable success message for the settings page after a real sync.
+    /// </summary>
+    /// <param name="played">Whether the item was marked watched.</param>
+    /// <param name="inProgress">Whether playback is in progress.</param>
+    /// <param name="postedToBluesky">Whether a Bluesky post was created.</param>
+    /// <returns>The success message.</returns>
     private static string BuildSuccessMessage(bool played, bool inProgress, bool postedToBluesky)
     {
         if (played)
@@ -417,15 +493,30 @@ public sealed class PopfeedSyncService
         return "Remote sync completed successfully. Matching Popfeed activity was removed when present.";
     }
 
-    private static string BuildActivityText(BaseItem item, string languageCode, bool played, bool inProgress)
+    /// <summary>
+    /// Dispatches to the language-specific activity text builder.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="languageCode">The preferred BCP-47 language code.</param>
+    /// <param name="played">Whether the item was fully watched (vs in progress).</param>
+    /// <returns>The activity text for the Bluesky post and review record.</returns>
+    private static string BuildActivityText(BaseItem item, string languageCode, bool played)
     {
         var normalizedLanguage = NormalizeLanguageCode(languageCode);
         return normalizedLanguage == "fr"
-            ? BuildFrenchActivityText(item, played, inProgress)
-            : BuildEnglishActivityText(item, played, inProgress);
+            ? BuildFrenchActivityText(item, played)
+            : BuildEnglishActivityText(item, played);
     }
 
-    private static string BuildEnglishActivityText(BaseItem item, bool played, bool inProgress)
+    /// <summary>
+    /// Builds the English activity sentence.
+    /// Uses past tense ("I watched") when <paramref name="played"/> is true,
+    /// present tense ("I am watching") otherwise.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="played">Whether the item was fully watched.</param>
+    /// <returns>The English activity text, truncated to the Bluesky post limit.</returns>
+    private static string BuildEnglishActivityText(BaseItem item, bool played)
     {
         var summary = item switch
         {
@@ -441,7 +532,14 @@ public sealed class PopfeedSyncService
             : TruncateBlueskyPost($"I am {summary} on Jellyfin via Popfeed.");
     }
 
-    private static string BuildFrenchActivityText(BaseItem item, bool played, bool inProgress)
+    /// <summary>
+    /// Builds the French activity sentence.
+    /// "J'ai regardé" = past (watched); "Je regarde" = present (in progress).
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="played">Whether the item was fully watched.</param>
+    /// <returns>The French activity text.</returns>
+    private static string BuildFrenchActivityText(BaseItem item, bool played)
     {
         var summary = item switch
         {
@@ -455,20 +553,11 @@ public sealed class PopfeedSyncService
         return summary;
     }
 
-    private static string BuildFrenchWatchedActivityText(BaseItem item)
-    {
-        var summary = item switch
-        {
-            Episode episode when episode.Series is not null => $"J'ai regardé {episode.Series.Name} {FormatEpisodeLabel(episode)}{FormatEpisodeTitleSuffix(episode)} sur Jellyfin via Popfeed.",
-            Season season when season.Series is not null && season.IndexNumber.HasValue => $"J'ai regardé la saison {season.IndexNumber.Value:00} de {season.Series.Name} sur Jellyfin via Popfeed.",
-            Movie movie when movie.ProductionYear.HasValue => $"J'ai regardé {movie.Name} ({movie.ProductionYear.Value}) sur Jellyfin via Popfeed.",
-            Movie movie => $"J'ai regardé {movie.Name} sur Jellyfin via Popfeed.",
-            _ => $"J'ai regardé {item.Name} sur Jellyfin via Popfeed.",
-        };
-
-        return TruncateBlueskyPost(summary);
-    }
-
+    /// <summary>
+    /// Formats the season/episode label, e.g. "S01E04". Uses "?" when the index is unknown.
+    /// </summary>
+    /// <param name="episode">The episode.</param>
+    /// <returns>The formatted S##E## label.</returns>
     private static string FormatEpisodeLabel(Episode episode)
     {
         var season = episode.ParentIndexNumber.HasValue ? $"S{episode.ParentIndexNumber.Value:00}" : "S?";
@@ -476,16 +565,38 @@ public sealed class PopfeedSyncService
         return season + episodeNumber;
     }
 
+    /// <summary>
+    /// Returns a quoted episode title suffix (e.g. <c> "Pilot"</c>),
+    /// or an empty string when the episode has no title.
+    /// </summary>
+    /// <param name="episode">The episode.</param>
+    /// <returns>The title suffix string.</returns>
     private static string FormatEpisodeTitleSuffix(Episode episode)
     {
         return string.IsNullOrWhiteSpace(episode.Name) ? string.Empty : $" \"{episode.Name}\"";
     }
 
+    /// <summary>
+    /// Formats a <see cref="DateTime"/> as an ISO-8601 UTC string for ATProto records.
+    /// </summary>
+    /// <param name="dateTime">The datetime to format.</param>
+    /// <returns>An ISO-8601 UTC string, e.g. <c>2026-05-19T12:00:00.000Z</c>.</returns>
     private static string ToAtProtoDateTime(DateTime dateTime)
     {
         return dateTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    /// <summary>
+    /// Constructs a <see cref="BlueskyFeedPostRecord"/> from the activity text and optional
+    /// Popfeed URL. When a URL is supplied, adds a rich-text link facet and an external embed card.
+    /// </summary>
+    /// <param name="item">The media item (used for the embed card title).</param>
+    /// <param name="languageCode">The BCP-47 language code for the post.</param>
+    /// <param name="fallbackActivityText">The pre-built activity sentence.</param>
+    /// <param name="popfeedItemUrl">Optional canonical Popfeed URL for the item.</param>
+    /// <param name="thumb">Optional poster blob already uploaded to the PDS.</param>
+    /// <param name="timestamp">The post creation timestamp.</param>
+    /// <returns>The constructed Bluesky post record.</returns>
     private static BlueskyFeedPostRecord BuildBlueskyPost(
         BaseItem item,
         string languageCode,
@@ -496,10 +607,10 @@ public sealed class PopfeedSyncService
     {
         var normalizedLanguage = NormalizeLanguageCode(languageCode);
         var linkLabel = normalizedLanguage == "fr" ? "Voir sur Popfeed" : "Open on Popfeed";
-        var text = fallbackActivityText;
+        // Append the link label on a new line only when we have a URL to attach.
         var postText = string.IsNullOrWhiteSpace(popfeedItemUrl)
-            ? text
-            : TruncateBlueskyPost(text + "\n\n" + linkLabel);
+            ? fallbackActivityText
+            : TruncateBlueskyPost(fallbackActivityText + "\n\n" + linkLabel);
 
         var post = new BlueskyFeedPostRecord
         {
@@ -540,6 +651,21 @@ public sealed class PopfeedSyncService
         return post;
     }
 
+    /// <summary>
+    /// Publishes a Bluesky post for the watched item. On failure caused by the
+    /// optional embed metadata (URL or thumbnail), retries once without it so the
+    /// plain-text post still goes through.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="item">The media item.</param>
+    /// <param name="languageCode">The BCP-47 language code for the post.</param>
+    /// <param name="activityText">The pre-built activity sentence.</param>
+    /// <param name="popfeedItemUrl">Optional canonical Popfeed URL.</param>
+    /// <param name="thumb">Optional poster blob already uploaded to the PDS.</param>
+    /// <param name="timestamp">The post creation timestamp.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The create-record response from the Bluesky PDS.</returns>
     private async Task<AtProtoCreateRecordResponse> CreateBlueskyPostAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
@@ -565,6 +691,12 @@ public sealed class PopfeedSyncService
         }
     }
 
+    /// <summary>
+    /// Builds the title string for the Bluesky external embed card.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="languageCode">The normalised BCP-47 language code.</param>
+    /// <returns>The localised embed card title.</returns>
     private static string BuildExternalEmbedTitle(BaseItem item, string languageCode)
     {
         var itemTitle = item is Movie movie && movie.ProductionYear.HasValue
@@ -576,6 +708,11 @@ public sealed class PopfeedSyncService
             : $"Popfeed activity for {itemTitle}";
     }
 
+    /// <summary>
+    /// Truncates a string to 100 characters for use as a Bluesky embed card description.
+    /// </summary>
+    /// <param name="text">The text to truncate.</param>
+    /// <returns>The truncated string, ending with an ellipsis when shortened.</returns>
     private static string TruncateBlueskyDescription(string text)
     {
         const int maxDescriptionLength = 100;
@@ -584,16 +721,24 @@ public sealed class PopfeedSyncService
             : text[..(maxDescriptionLength - 1)] + "…";
     }
 
-    internal static string? BuildPopfeedItemUrl(PopfeedMappedItem mappedItem, BaseItem? sourceItem = null)
-    {
-        return PopfeedItemUrlBuilder.BuildItemUrl(mappedItem, sourceItem);
-    }
-
+    /// <summary>
+    /// Returns the UTF-8 byte count for a string, used to compute byte-precise
+    /// Bluesky rich-text facet offsets (Bluesky counts bytes, not characters).
+    /// </summary>
+    /// <param name="value">The string to measure.</param>
+    /// <returns>The UTF-8 byte count.</returns>
     private static int GetUtf8ByteCount(string value)
     {
         return Encoding.UTF8.GetByteCount(value);
     }
 
+    /// <summary>
+    /// Normalises a BCP-47 language code to a consistent lowercase form.
+    /// Compound codes such as "pt-BR" are preserved; simple codes are lowercased.
+    /// Falls back to "en" when the input is null or whitespace.
+    /// </summary>
+    /// <param name="languageCode">The raw language code from user configuration.</param>
+    /// <returns>The normalised language code.</returns>
     private static string NormalizeLanguageCode(string? languageCode)
     {
         if (string.IsNullOrWhiteSpace(languageCode))
@@ -607,6 +752,13 @@ public sealed class PopfeedSyncService
             : trimmed.ToLowerInvariant();
     }
 
+    /// <summary>
+    /// Extracts the ATProto record key (rkey) from the trailing segment of a record URI.
+    /// </summary>
+    /// <param name="uri">The ATProto record URI, e.g.
+    /// <c>at://did:plc:xxx/social.popfeed.feed.review/rkey123</c>.</param>
+    /// <returns>The rkey string.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the URI has no segments.</exception>
     private static string GetRecordKey(string uri)
     {
         var segments = uri.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -618,6 +770,12 @@ public sealed class PopfeedSyncService
         return segments[^1];
     }
 
+    /// <summary>
+    /// Truncates a string to <see cref="BlueskyPostMaxLength"/> characters,
+    /// appending "..." when the text is shortened.
+    /// </summary>
+    /// <param name="text">The text to truncate.</param>
+    /// <returns>The truncated string.</returns>
     private static string TruncateBlueskyPost(string text)
     {
         return text.Length <= BlueskyPostMaxLength
@@ -625,6 +783,12 @@ public sealed class PopfeedSyncService
             : text[..(BlueskyPostMaxLength - 3)] + "...";
     }
 
+    /// <summary>
+    /// Logs at <c>Information</c> level when debug logging is enabled in plugin settings,
+    /// otherwise logs at <c>Debug</c> level so normal deployments stay quiet.
+    /// </summary>
+    /// <param name="message">The message template.</param>
+    /// <param name="arguments">The message arguments.</param>
     private void LogVerbose(string message, params object?[] arguments)
     {
         if (Plugin.Instance.Configuration.EnableDebugLogging)
