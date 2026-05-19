@@ -54,7 +54,9 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         bool removeWhenUnplayed,
         CancellationToken cancellationToken)
     {
-        mappedItem = NormalizeMappedItemForWatchedUrl(mappedItem, item);
+        // Normalise identifiers to the canonical Popfeed URL shape
+        // (TmdbTvSeriesId + SeasonNumber + EpisodeNumber) before any remote I/O.
+        mappedItem = PopfeedItemUrlBuilder.NormalizeMappedItem(mappedItem, item);
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
         var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
@@ -83,8 +85,9 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRecord, cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("Synced watched list item for {ItemName} to Popfeed account {Identifier}.", title, userConfiguration.Identifier);
             }
-            else if (existingListItem is not null)
+            else
             {
+                // An existing list item was found; update it only if something meaningful changed.
                 var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played);
 
                 if (needsUpdate)
@@ -178,6 +181,17 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return null;
     }
 
+    /// <summary>
+    /// Determines whether a watched-list item record needs to be updated.
+    /// An update is required when the status, title, identifiers, creative work type,
+    /// or completion timestamp differ from the desired state.
+    /// </summary>
+    /// <param name="existing">The record currently stored in the PDS.</param>
+    /// <param name="mappedItem">The desired mapped item.</param>
+    /// <param name="desiredStatus">The desired status string.</param>
+    /// <param name="title">The desired title.</param>
+    /// <param name="played">Whether the item is fully watched.</param>
+    /// <returns><see langword="true"/> when the record should be updated.</returns>
     internal static bool NeedsListItemUpdate(
         PopfeedListItemRecord existing,
         PopfeedMappedItem mappedItem,
@@ -193,11 +207,28 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             || (!played && existing.CompletedAt is not null);
     }
 
+    /// <summary>
+    /// Delegates to <see cref="PopfeedItemUrlBuilder.NormalizeMappedItem"/> so
+    /// tests and callers outside this class can access the same canonical normalisation
+    /// without a direct dependency on the URL builder.
+    /// </summary>
+    /// <param name="mappedItem">The mapped item to normalise.</param>
+    /// <param name="sourceItem">Optional Jellyfin item to fill missing season/episode indexes.</param>
+    /// <returns>The normalised mapped item.</returns>
     internal static PopfeedMappedItem NormalizeMappedItemForWatchedUrl(PopfeedMappedItem mappedItem, BaseItem? sourceItem = null)
     {
         return PopfeedItemUrlBuilder.NormalizeMappedItem(mappedItem, sourceItem);
     }
 
+    /// <summary>
+    /// Ensures the correct watched list exists for the given creative work type, creating it when absent.
+    /// The list URI is cached on the user configuration to avoid repeated pagination on subsequent syncs.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="creativeWorkType">The creative work type (e.g. "movie", "tv_episode").</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The ATProto URI of the watched list.</returns>
     private async Task<string> EnsureWatchedListAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
@@ -244,6 +275,14 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return created.Uri;
     }
 
+    /// <summary>
+    /// Returns the localised watched-list name for the given creative work type.
+    /// When the user has configured a custom name (other than the default "Watched"),
+    /// that name is used regardless of type.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="creativeWorkType">The creative work type.</param>
+    /// <returns>The list name string.</returns>
     private static string GetWatchedListName(PopfeedUserConfiguration userConfiguration, string creativeWorkType)
     {
         var configuredName = userConfiguration.WatchedListName?.Trim();
@@ -261,6 +300,17 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
     }
 
+    /// <summary>
+    /// Searches all list-item records in the PDS for one that belongs to
+    /// <paramref name="watchedListUri"/> and matches the given identifiers.
+    /// Returns null when no match is found.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="watchedListUri">The parent list URI to filter by.</param>
+    /// <param name="identifiers">The identifiers to match.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The matching record, or null when absent.</returns>
     private async Task<AtProtoRecord<PopfeedListItemRecord>?> FindExistingListItemAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
@@ -290,6 +340,15 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return null;
     }
 
+    /// <summary>
+    /// Searches all review records in the PDS for one that matches the given identifiers.
+    /// Returns null when no matching activity exists.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="identifiers">The identifiers to match.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The matching record, or null when absent.</returns>
     private async Task<AtProtoRecord<PopfeedReviewRecord>?> FindExistingActivityAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
@@ -316,6 +375,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return null;
     }
 
+    /// <summary>
+    /// Builds the activity title shown in the review record.
+    /// For episodes this prepends the series name for context.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <param name="fallbackTitle">The raw item title from Jellyfin.</param>
+    /// <returns>The formatted activity title.</returns>
     private static string BuildActivityTitle(BaseItem item, string fallbackTitle)
     {
         return item is Episode episode && episode.Series is not null
@@ -323,6 +389,19 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             : fallbackTitle;
     }
 
+    /// <summary>
+    /// Builds the full review record to write (or compare against an existing one).
+    /// Attempts to upload the item poster so the review includes a thumbnail.
+    /// </summary>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="mappedItem">The normalised mapped item.</param>
+    /// <param name="title">The display title.</param>
+    /// <param name="activityText">The pre-built activity sentence.</param>
+    /// <param name="item">The Jellyfin media item (used for poster and release date).</param>
+    /// <param name="playedAt">The watched timestamp.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The constructed review record.</returns>
     private async Task<PopfeedReviewRecord> BuildReviewRecordAsync(
         AtProtoSessionResponse session,
         PopfeedUserConfiguration userConfiguration,
@@ -354,6 +433,15 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return record;
     }
 
+    /// <summary>
+    /// Attempts to upload the item's primary poster image to the ATProto PDS as a blob.
+    /// Returns null when no image is available or the upload fails.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="item">The media item.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The uploaded blob, or null when unavailable.</returns>
     private async Task<AtProtoBlob?> TryUploadPosterAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
@@ -389,6 +477,12 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         }
     }
 
+    /// <summary>
+    /// Returns the filesystem path to the primary poster image for the item.
+    /// For episodes without a poster, falls back to the parent series poster.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <returns>The image path, or null when no poster is available.</returns>
     private static string? GetPosterImagePath(BaseItem item)
     {
         if (item.HasImage(ImageType.Primary, 0))
@@ -404,16 +498,24 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
     }
 
+    /// <summary>
+    /// Returns the ATProto-formatted premiere date for the item, or null when unknown.
+    /// </summary>
+    /// <param name="item">The media item.</param>
+    /// <returns>An ISO-8601 UTC string, or null.</returns>
     private static string? GetReleaseDate(BaseItem item)
     {
-        if (item.PremiereDate.HasValue)
-        {
-            return ToAtProtoDateTime(item.PremiereDate.Value);
-        }
-
-        return null;
+        return item.PremiereDate.HasValue
+            ? ToAtProtoDateTime(item.PremiereDate.Value)
+            : null;
     }
 
+    /// <summary>
+    /// Returns the MIME type for a poster image path based on file extension.
+    /// Returns null for unsupported types so the image is silently skipped.
+    /// </summary>
+    /// <param name="path">The image file path.</param>
+    /// <returns>The MIME type string, or null when the extension is unsupported.</returns>
     private static string? GetMimeType(string path)
     {
         return Path.GetExtension(path).ToLowerInvariant() switch
@@ -425,6 +527,14 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
     }
 
+    /// <summary>
+    /// Merges a new desired review record into an existing one, preserving fields that
+    /// should survive re-syncs (creation timestamp, poster, cross-posts, revisit flag,
+    /// and tags are union-merged so no previously set tag is lost).
+    /// </summary>
+    /// <param name="existing">The record currently in the PDS.</param>
+    /// <param name="desired">The freshly built desired record.</param>
+    /// <returns>A merged record ready to be written back.</returns>
     internal static PopfeedReviewRecord MergeExistingReview(PopfeedReviewRecord existing, PopfeedReviewRecord desired)
     {
         // Merge tags by union so we don't lose important tags (e.g., ensure "watched" is present)
@@ -460,6 +570,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
     }
 
+    /// <summary>
+    /// Returns whether the existing review record differs from the merged one
+    /// in any field that warrants a PDS write.
+    /// </summary>
+    /// <param name="existing">The record currently in the PDS.</param>
+    /// <param name="merged">The result of <see cref="MergeExistingReview"/>.</param>
+    /// <returns><see langword="true"/> when the record should be updated.</returns>
     internal static bool NeedsReviewUpdate(PopfeedReviewRecord existing, PopfeedReviewRecord merged)
     {
         var existingTags = new HashSet<string>(existing.Tags ?? new List<string>(), StringComparer.Ordinal);
@@ -475,6 +592,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             || !existingTags.SetEquals(mergedTags);
     }
 
+    /// <summary>
+    /// Builds the public CDN URL for a poster blob uploaded to a Bluesky PDS.
+    /// Returns null when the blob is missing required fields.
+    /// </summary>
+    /// <param name="did">The account DID used in the CDN path.</param>
+    /// <param name="blob">The uploaded blob descriptor.</param>
+    /// <returns>The CDN URL string, or null.</returns>
     private static string? BuildPosterUrl(string did, AtProtoBlob? blob)
     {
         if (blob is null || string.IsNullOrWhiteSpace(blob.Ref.Link) || string.IsNullOrWhiteSpace(blob.MimeType))
@@ -495,11 +619,22 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             : $"https://cdn.bsky.app/img/feed_fullsize/plain/{did}/{blob.Ref.Link}@{extension}";
     }
 
+    /// <summary>
+    /// Formats a <see cref="DateTime"/> as an ISO-8601 UTC string for ATProto records.
+    /// </summary>
+    /// <param name="dateTime">The datetime to format.</param>
+    /// <returns>An ISO-8601 UTC string, e.g. <c>2026-05-19T12:00:00.000Z</c>.</returns>
     private static string ToAtProtoDateTime(DateTime dateTime)
     {
         return dateTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
     }
 
+    /// <summary>
+    /// Extracts the ATProto record key (rkey) from the trailing segment of a record URI.
+    /// </summary>
+    /// <param name="uri">The ATProto record URI.</param>
+    /// <returns>The rkey string.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the URI has no segments.</exception>
     private static string GetRecordKey(string uri)
     {
         var segments = uri.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -511,6 +646,11 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return segments[^1];
     }
 
+    /// <summary>
+    /// Logs at <c>Information</c> level when debug logging is enabled, otherwise at <c>Debug</c>.
+    /// </summary>
+    /// <param name="message">The message template.</param>
+    /// <param name="arguments">The message arguments.</param>
     private void LogVerbose(string message, params object?[] arguments)
     {
         if (Plugin.Instance.Configuration.EnableDebugLogging)
