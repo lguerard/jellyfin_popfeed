@@ -247,6 +247,28 @@ public sealed class PopfeedEpisodeIdentifierTests
     }
 
     /// <summary>
+    /// Ted Lasso season 3 episode 4 must resolve to the canonical Popfeed episode URL.
+    /// This mirrors the exact URL that both watched-list sync and Bluesky posting use.
+    /// </summary>
+    [Fact]
+    public void BuildItemUrl_UsesTedLassoSeason3Episode4CanonicalPath()
+    {
+        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(
+            new PopfeedMappedItem(
+                "tv_episode",
+                new PopfeedIdentifiers
+                {
+                    TmdbTvSeriesId = "97546",
+                    SeasonNumber = 3,
+                    EpisodeNumber = 4,
+                }));
+
+        Assert.Equal(
+            "https://popfeed.social/episode?tvId=97546&seasonNumber=3&episodeNumber=4",
+            itemUrl);
+    }
+
+    /// <summary>
     /// A legacy episode shape (TmdbId instead of TmdbTvSeriesId) must be automatically
     /// normalised and produce the correct canonical episode URL.
     /// Previously the builder returned null for this shape; it now normalises it.
