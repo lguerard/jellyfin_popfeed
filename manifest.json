@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.3.4.0",
+        "changelog": "- refactor(sync): ♻️ unify Popfeed item URL builder into shared service\r\n- test(sync): ✅ add regression for shared canonical episode URL",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.3.4/Jellyfin.Plugin.Popfeed-v0.3.4.zip",
+        "checksum": "2793df98ba478550dae89743c5a5881e",
+        "timestamp": "2026-05-19T07:09:45.1538917Z"
+      },
+      {
         "version": "0.3.3.0",
         "changelog": "- fix(sync): 🐛 correct Popfeed item links",
         "targetAbi": "10.11.0.0",
