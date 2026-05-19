@@ -321,7 +321,7 @@ public sealed class PopfeedSyncService
                     try
                     {
                         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-                        var popfeedItemUrl = BuildPopfeedItemUrl(mapped);
+                        var popfeedItemUrl = BuildPopfeedItemUrl(mapped, item);
                         var createdPost = await CreateBlueskyPostAsync(
                             userConfiguration,
                             session,
@@ -584,24 +584,9 @@ public sealed class PopfeedSyncService
             : text[..(maxDescriptionLength - 1)] + "…";
     }
 
-    internal static string? BuildPopfeedItemUrl(PopfeedMappedItem mappedItem)
+    internal static string? BuildPopfeedItemUrl(PopfeedMappedItem mappedItem, BaseItem? sourceItem = null)
     {
-        ArgumentNullException.ThrowIfNull(mappedItem);
-
-        var identifiers = mappedItem.Identifiers;
-        return mappedItem.CreativeWorkType switch
-        {
-            "movie" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
-                => $"https://popfeed.social/movie/{Uri.EscapeDataString(identifiers.TmdbId)}",
-            "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
-                && identifiers.SeasonNumber.HasValue
-                && identifiers.EpisodeNumber.HasValue
-                => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
-            "tv_season" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
-                && identifiers.SeasonNumber.HasValue
-                => $"https://popfeed.social/season?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}",
-            _ => null,
-        };
+        return PopfeedItemUrlBuilder.BuildItemUrl(mappedItem, sourceItem);
     }
 
     private static int GetUtf8ByteCount(string value)

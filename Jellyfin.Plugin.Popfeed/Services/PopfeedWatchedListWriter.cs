@@ -54,6 +54,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         bool removeWhenUnplayed,
         CancellationToken cancellationToken)
     {
+        mappedItem = NormalizeMappedItemForWatchedUrl(mappedItem, item);
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
         var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
@@ -190,6 +191,11 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             || !string.Equals(existing.CreativeWorkType, mappedItem.CreativeWorkType, StringComparison.Ordinal)
             || (played && existing.CompletedAt is null)
             || (!played && existing.CompletedAt is not null);
+    }
+
+    internal static PopfeedMappedItem NormalizeMappedItemForWatchedUrl(PopfeedMappedItem mappedItem, BaseItem? sourceItem = null)
+    {
+        return PopfeedItemUrlBuilder.NormalizeMappedItem(mappedItem, sourceItem);
     }
 
     private async Task<string> EnsureWatchedListAsync(

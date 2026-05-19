@@ -226,4 +226,63 @@ public sealed class PopfeedEpisodeIdentifierTests
 
         Assert.Null(itemUrl);
     }
+
+    [Fact]
+    public void NormalizeMappedItemForWatchedUrl_RewritesLegacyEpisodeShape()
+    {
+        var normalized = PopfeedWatchedListWriter.NormalizeMappedItemForWatchedUrl(
+            new PopfeedMappedItem(
+                "tv_episode",
+                new PopfeedIdentifiers
+                {
+                    TmdbId = "4556",
+                    SeasonNumber = 1,
+                    EpisodeNumber = 1,
+                }));
+
+        Assert.Equal("tv_episode", normalized.CreativeWorkType);
+        Assert.Equal("4556", normalized.Identifiers.TmdbTvSeriesId);
+        Assert.Null(normalized.Identifiers.TmdbId);
+        Assert.Equal(1, normalized.Identifiers.SeasonNumber);
+        Assert.Equal(1, normalized.Identifiers.EpisodeNumber);
+    }
+
+    [Fact]
+    public void NormalizeAndBuildPopfeedItemUrl_UseSameCanonicalEpisodeShape()
+    {
+        var mapped = new PopfeedMappedItem(
+            "tv_episode",
+            new PopfeedIdentifiers
+            {
+                TmdbId = "4556",
+                SeasonNumber = 1,
+                EpisodeNumber = 1,
+            });
+
+        var normalized = PopfeedWatchedListWriter.NormalizeMappedItemForWatchedUrl(mapped);
+        var itemUrl = PopfeedSyncService.BuildPopfeedItemUrl(mapped);
+
+        Assert.Equal("4556", normalized.Identifiers.TmdbTvSeriesId);
+        Assert.Equal(
+            "https://popfeed.social/episode?tvId=4556&seasonNumber=1&episodeNumber=1",
+            itemUrl);
+    }
+
+    [Fact]
+    public void NormalizeMappedItemForWatchedUrl_RewritesLegacySeasonShape()
+    {
+        var normalized = PopfeedWatchedListWriter.NormalizeMappedItemForWatchedUrl(
+            new PopfeedMappedItem(
+                "tv_season",
+                new PopfeedIdentifiers
+                {
+                    TmdbId = "4556",
+                    SeasonNumber = 1,
+                }));
+
+        Assert.Equal("tv_season", normalized.CreativeWorkType);
+        Assert.Equal("4556", normalized.Identifiers.TmdbTvSeriesId);
+        Assert.Null(normalized.Identifiers.TmdbId);
+        Assert.Equal(1, normalized.Identifiers.SeasonNumber);
+    }
 }
