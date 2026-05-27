@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.3.6.1",
+        "changelog": "- fix(api): 🐛 use GetUsers() instead of deprecated Users property",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.3.6.1/Jellyfin.Plugin.Popfeed-v0.3.6.1.zip",
+        "checksum": "5411ff3282bdb5d6a43954ec085605f1",
+        "timestamp": "2026-05-27T14:28:30.1083999Z"
+      },
+      {
         "version": "0.3.5.0",
         "changelog": "- refactor(sync): ♻️ clean up dead code, wrappers and unused params\r\n- test(sync): ✅ fix URL builder test runtime deps",
         "targetAbi": "10.11.0.0",
