@@ -62,7 +62,7 @@ public sealed class PopfeedController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PopfeedJellyfinUserDto[]> GetUsers()
     {
-        var users = _userManager.Users
+        var users = _userManager.GetUsers()
             .OrderBy(user => user.Username)
             .Select(user => new PopfeedJellyfinUserDto
             {
@@ -128,7 +128,7 @@ public sealed class PopfeedController : ControllerBase
     public ActionResult<PopfeedSyncTestResult[]> GetStatus([FromQuery] Guid? userId, [FromQuery] int limit = 12)
     {
         var effectiveLimit = Math.Clamp(limit, 1, 50);
-        var userNames = _userManager.Users.ToDictionary(user => user.Id, user => user.Username);
+        var userNames = _userManager.GetUsers().ToDictionary(user => user.Id, user => user.Username);
 
         var entries = _statusStore.GetRecent(userId, effectiveLimit)
             .Select(entry =>
