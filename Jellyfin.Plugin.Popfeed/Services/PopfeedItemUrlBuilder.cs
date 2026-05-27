@@ -35,7 +35,7 @@ internal static class PopfeedItemUrlBuilder
                 && episodeNumber.HasValue)
             {
                 return new PopfeedMappedItem(
-                    mappedItem.CreativeWorkType,
+                    "episode",
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
@@ -87,7 +87,7 @@ internal static class PopfeedItemUrlBuilder
         {
             "movie" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
                 => $"https://popfeed.social/movie/{Uri.EscapeDataString(identifiers.TmdbId)}",
-            "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            "episode" or "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue
                 => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",

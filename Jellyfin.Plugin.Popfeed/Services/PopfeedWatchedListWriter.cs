@@ -295,7 +295,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return creativeWorkType switch
         {
             "movie" => "Watched Movies",
-            "tv_episode" or "tv_season" or "tv_show" => "Watched Shows",
+            "episode" or "tv_episode" or "tv_season" or "tv_show" => "Watched Shows",
             _ => "Watched",
         };
     }
