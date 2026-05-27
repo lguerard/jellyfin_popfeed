@@ -81,7 +81,7 @@ public sealed class PopfeedUserConfiguration
         return creativeWorkType switch
         {
             "movie" => WatchedMovieListUri,
-            "tv_episode" or "tv_season" or "tv_show" => WatchedTelevisionListUri,
+            "episode" or "tv_episode" or "tv_season" or "tv_show" => WatchedTelevisionListUri,
             _ => WatchedListUri,
         };
     }
@@ -98,6 +98,7 @@ public sealed class PopfeedUserConfiguration
             case "movie":
                 WatchedMovieListUri = uri;
                 break;
+            case "episode":
             case "tv_episode":
             case "tv_season":
             case "tv_show":

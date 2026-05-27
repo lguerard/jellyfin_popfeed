@@ -143,7 +143,7 @@ public sealed class PopfeedEpisodeIdentifierTests
         };
 
         var mappedItem = new PopfeedMappedItem(
-            "tv_episode",
+            "episode",
             new PopfeedIdentifiers
             {
                 TmdbTvSeriesId = "279471",
@@ -187,7 +187,7 @@ public sealed class PopfeedEpisodeIdentifierTests
         {
             Title = existing.Title,
             Text = existing.Text,
-            CreativeWorkType = existing.CreativeWorkType,
+            CreativeWorkType = "episode",
             Identifiers = new PopfeedIdentifiers
             {
                 TmdbTvSeriesId = "279471",
@@ -309,7 +309,7 @@ public sealed class PopfeedEpisodeIdentifierTests
                     EpisodeNumber = 1,
                 }));
 
-        Assert.Equal("tv_episode", normalized.CreativeWorkType);
+        Assert.Equal("episode", normalized.CreativeWorkType);
         Assert.Equal("4556", normalized.Identifiers.TmdbTvSeriesId);
         Assert.Null(normalized.Identifiers.TmdbId);
         Assert.Equal(1, normalized.Identifiers.SeasonNumber);
