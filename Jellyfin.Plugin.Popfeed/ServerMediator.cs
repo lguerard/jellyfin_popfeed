@@ -65,17 +65,14 @@ public sealed class ServerMediator : IHostedService
             var isPlaybackProgress = string.Equals(saveReason, "PlaybackProgress", StringComparison.Ordinal);
             var isPlaybackFinished = string.Equals(saveReason, "PlaybackFinished", StringComparison.Ordinal);
             var isTogglePlayed = string.Equals(saveReason, "TogglePlayed", StringComparison.Ordinal);
-            var isWatching = !isPlayed && (isPlaybackStart || isPlaybackProgress || isPlaybackFinished);
+
+            // Track in-progress state only on PlaybackStart and PlaybackFinished
+            // (not PlaybackProgress, which fires too frequently).
+            var isWatching = !isPlayed && (isPlaybackStart || isPlaybackFinished);
 
             if (!isPlayed && !isWatching && !isTogglePlayed)
             {
                 LogVerbose("Ignoring user data save event because save reason {SaveReason} does not reflect a playable state.", eventArgs.SaveReason);
-                return;
-            }
-
-            if (isWatching)
-            {
-                LogVerbose("Ignoring user data save event for {ItemName} because playback is still in progress and not marked watched by Jellyfin.", eventArgs.Item.Name);
                 return;
             }
 
@@ -109,10 +106,10 @@ public sealed class ServerMediator : IHostedService
                 eventArgs.SaveReason,
                 eventArgs.UserId,
                 isPlayed,
-                false,
+                isWatching,
                 playedAt);
 
-            await _syncService.SyncPlaystateAsync(eventArgs.UserId, syncItem, isPlayed, false, playedAt, CancellationToken.None).ConfigureAwait(false);
+            await _syncService.SyncPlaystateAsync(eventArgs.UserId, syncItem, isPlayed, isWatching, playedAt, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
