@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.3.8.0",
+        "changelog": "- feat(mediator): ✨ sync in-progress state on playback start/finish",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.3.8/Jellyfin.Plugin.Popfeed-v0.3.8.zip",
+        "checksum": "9674dbff9dcb569bc10b437205707af6",
+        "timestamp": "2026-05-28T15:02:11.2945096Z"
+      },
+      {
         "version": "0.3.7.0",
         "changelog": "- Fix Jellyfin compatibility metadata and target framework\r\n- build: 🏗️ target net9.0 and Jellyfin 10.11 packages",
         "targetAbi": "10.11.0.0",
