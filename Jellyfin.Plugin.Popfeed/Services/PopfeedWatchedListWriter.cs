@@ -559,13 +559,15 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         CancellationToken cancellationToken)
     {
         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
+        var reviewIdentifiers = BuildReviewIdentifiers(mappedItem, item);
+        var reviewCreativeWorkType = GetReviewCreativeWorkType(mappedItem.CreativeWorkType);
         var record = new PopfeedReviewRecord
         {
             Title = BuildActivityTitle(item, title),
             Text = activityText,
             Rating = 5,
-            Identifiers = mappedItem.Identifiers,
-            CreativeWorkType = mappedItem.CreativeWorkType,
+            Identifiers = reviewIdentifiers,
+            CreativeWorkType = reviewCreativeWorkType,
             CreatedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
             Tags = ["jellyfin", "watched"],
             Facets = [],
@@ -577,6 +579,37 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         record.Poster = await TryUploadPosterAsync(userConfiguration, session, item, cancellationToken).ConfigureAwait(false);
         record.PosterUrl = BuildPosterUrl(session.Did, record.Poster);
         return record;
+    }
+
+    private static PopfeedIdentifiers BuildReviewIdentifiers(PopfeedMappedItem mappedItem, BaseItem item)
+    {
+        var identifiers = new PopfeedIdentifiers
+        {
+            ImdbId = mappedItem.Identifiers.ImdbId,
+            TmdbId = mappedItem.Identifiers.TmdbId,
+            TmdbTvSeriesId = mappedItem.Identifiers.TmdbTvSeriesId,
+            SeasonNumber = mappedItem.Identifiers.SeasonNumber,
+            EpisodeNumber = mappedItem.Identifiers.EpisodeNumber,
+        };
+
+        if ((string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
+            && string.IsNullOrWhiteSpace(identifiers.TmdbId)
+            && item is Episode episode
+            && episode.TryGetProviderId(MetadataProvider.Tmdb, out var episodeTmdbId)
+            && !string.IsNullOrWhiteSpace(episodeTmdbId))
+        {
+            identifiers.TmdbId = episodeTmdbId;
+        }
+
+        return identifiers;
+    }
+
+    private static string GetReviewCreativeWorkType(string creativeWorkType)
+    {
+        return string.Equals(creativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase)
+            ? "episode"
+            : creativeWorkType;
     }
 
     /// <summary>

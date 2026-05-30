@@ -213,7 +213,7 @@ public sealed class PopfeedSyncService
 
             return (!hasEpisodeShape && !hasStandaloneId)
                 ? null
-                : new PopfeedMappedItem("episode", identifiers);
+                : new PopfeedMappedItem("tv_episode", identifiers);
         }
 
         return null;

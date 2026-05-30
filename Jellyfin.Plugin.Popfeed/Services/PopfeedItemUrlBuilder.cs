@@ -28,6 +28,7 @@ internal static class PopfeedItemUrlBuilder
             || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.Ordinal))
         {
             var episode = sourceItem as Episode;
+            var episodeTmdbId = GetProviderId(episode, MetadataProvider.Tmdb);
             var tvSeriesId = FirstNonEmpty(
                 identifiers.TmdbTvSeriesId,
                 GetProviderId(episode?.Series, MetadataProvider.Tmdb));
@@ -46,7 +47,9 @@ internal static class PopfeedItemUrlBuilder
                         // Keep canonical tv-episode coordinates only. Some Popfeed
                         // surfaces prioritize TmdbId when present and can route to
                         // legacy /episode/{id} links instead of season/episode URLs.
-                        TmdbId = null,
+                        // When available from Jellyfin episode metadata, keep the
+                        // true episode TMDb id for Popfeed surfaces that require it.
+                        TmdbId = episodeTmdbId,
                         TmdbTvSeriesId = tvSeriesId,
                         SeasonNumber = seasonNumber,
                         EpisodeNumber = episodeNumber,
