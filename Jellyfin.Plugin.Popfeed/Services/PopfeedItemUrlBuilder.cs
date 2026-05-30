@@ -52,36 +52,6 @@ internal static class PopfeedItemUrlBuilder
                     });
             }
 
-            // Best-effort legacy recovery: older records can store series id in TmdbId
-            // with season/episode coordinates. Promote that shape to canonical series ids.
-            // If the source episode explicitly carries this exact value as its episode TMDb id,
-            // keep it as an episode id and avoid promotion.
-            var canUseLegacySeriesShape = string.IsNullOrWhiteSpace(tvSeriesId)
-                && !string.IsNullOrWhiteSpace(identifiers.TmdbId)
-                && seasonNumber.HasValue
-                && episodeNumber.HasValue;
-            if (canUseLegacySeriesShape)
-            {
-                var episodeTmdbId = GetProviderId(episode, MetadataProvider.Tmdb);
-                var shouldPromote = episode is null
-                    || string.IsNullOrWhiteSpace(episodeTmdbId)
-                    || !string.Equals(episodeTmdbId, identifiers.TmdbId, StringComparison.OrdinalIgnoreCase);
-
-                if (shouldPromote)
-                {
-                    return new PopfeedMappedItem(
-                        "episode",
-                        new PopfeedIdentifiers
-                        {
-                            ImdbId = identifiers.ImdbId,
-                            TmdbId = null,
-                            TmdbTvSeriesId = identifiers.TmdbId,
-                            SeasonNumber = seasonNumber,
-                            EpisodeNumber = episodeNumber,
-                        });
-                }
-            }
-
             if (!string.IsNullOrWhiteSpace(identifiers.TmdbId))
             {
                 return new PopfeedMappedItem(
@@ -89,10 +59,13 @@ internal static class PopfeedItemUrlBuilder
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
+                        // Canonical-only rule: when series coordinates are unavailable,
+                        // keep this as an episode-id fallback and drop season/episode
+                        // to avoid persisting legacy series-shaped identifiers.
                         TmdbId = identifiers.TmdbId,
                         TmdbTvSeriesId = null,
-                        SeasonNumber = seasonNumber,
-                        EpisodeNumber = episodeNumber,
+                        SeasonNumber = null,
+                        EpisodeNumber = null,
                     });
             }
         }
@@ -141,11 +114,6 @@ internal static class PopfeedItemUrlBuilder
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue
                 => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
-            "episode" or "tv_episode" when string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
-                && !string.IsNullOrWhiteSpace(identifiers.TmdbId)
-                && identifiers.SeasonNumber.HasValue
-                && identifiers.EpisodeNumber.HasValue
-                => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
             "episode" or "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
                 => $"https://popfeed.social/episode/{Uri.EscapeDataString(identifiers.TmdbId)}",
             "tv_season" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)

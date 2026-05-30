@@ -192,15 +192,18 @@ public sealed class PopfeedSyncService
         {
             var tmdbTvSeriesId = GetProviderId(episode.Series, MetadataProvider.Tmdb);
             var episodeTmdbId = GetProviderId(episode, MetadataProvider.Tmdb);
+            var hasCanonicalSeriesCoordinates = !string.IsNullOrWhiteSpace(tmdbTvSeriesId)
+                && episode.ParentIndexNumber.HasValue
+                && episode.IndexNumber.HasValue;
             var identifiers = new PopfeedIdentifiers
             {
                 ImdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId) ? GetProviderId(episode, MetadataProvider.Imdb) : null,
-                // Keep the episode-level TMDb id when available. Popfeed uses this
-                // to resolve the exact episode entity and avoid series-level fallback links.
+                // Episode TMDb id stays as fallback only. Canonical episode shape
+                // is expressed exclusively via TmdbTvSeriesId + season + episode.
                 TmdbId = episodeTmdbId,
                 TmdbTvSeriesId = tmdbTvSeriesId,
-                SeasonNumber = episode.ParentIndexNumber,
-                EpisodeNumber = episode.IndexNumber,
+                SeasonNumber = hasCanonicalSeriesCoordinates ? episode.ParentIndexNumber : null,
+                EpisodeNumber = hasCanonicalSeriesCoordinates ? episode.IndexNumber : null,
             };
 
             var hasEpisodeShape = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)

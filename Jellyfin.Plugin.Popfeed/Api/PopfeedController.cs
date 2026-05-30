@@ -948,6 +948,9 @@ public sealed class PopfeedController : ControllerBase
         var episodeTmdbId = GetProviderId(
             episode,
             MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
+        var hasCanonicalSeriesCoordinates = !string.IsNullOrWhiteSpace(tmdbTvSeriesId)
+            && episode.ParentIndexNumber.HasValue
+            && episode.IndexNumber.HasValue;
 
         var identifiers = new PopfeedIdentifiers
         {
@@ -956,8 +959,8 @@ public sealed class PopfeedController : ControllerBase
                 : null,
             TmdbId = episodeTmdbId,
             TmdbTvSeriesId = tmdbTvSeriesId,
-            SeasonNumber = episode.ParentIndexNumber,
-            EpisodeNumber = episode.IndexNumber,
+            SeasonNumber = hasCanonicalSeriesCoordinates ? episode.ParentIndexNumber : null,
+            EpisodeNumber = hasCanonicalSeriesCoordinates ? episode.IndexNumber : null,
         };
 
         var hasEpisodeShape = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
