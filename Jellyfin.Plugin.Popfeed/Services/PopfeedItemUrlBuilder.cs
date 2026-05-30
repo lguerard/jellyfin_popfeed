@@ -2,6 +2,7 @@ using System;
 using Jellyfin.Plugin.Popfeed.Models;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Model.Entities;
 
 namespace Jellyfin.Plugin.Popfeed.Services;
 
@@ -26,7 +27,9 @@ internal static class PopfeedItemUrlBuilder
         if (mappedItem.CreativeWorkType == "tv_episode")
         {
             var episode = sourceItem as Episode;
-            var tvSeriesId = identifiers.TmdbTvSeriesId;
+            var tvSeriesId = FirstNonEmpty(
+                identifiers.TmdbTvSeriesId,
+                GetProviderId(episode?.Series, MetadataProvider.Tmdb));
             var seasonNumber = identifiers.SeasonNumber ?? episode?.ParentIndexNumber;
             var episodeNumber = identifiers.EpisodeNumber ?? episode?.IndexNumber;
 
@@ -49,9 +52,36 @@ internal static class PopfeedItemUrlBuilder
                     });
             }
 
-            // Do not promote TmdbId into TmdbTvSeriesId for episodes.
-            // TmdbId is the episode id and must keep routing to /episode/{id}
-            // instead of being misinterpreted as a series id.
+            // Best-effort legacy recovery: older records can store series id in TmdbId
+            // with season/episode coordinates. Promote that shape to canonical series ids.
+            // If the source episode explicitly carries this exact value as its episode TMDb id,
+            // keep it as an episode id and avoid promotion.
+            var canUseLegacySeriesShape = string.IsNullOrWhiteSpace(tvSeriesId)
+                && !string.IsNullOrWhiteSpace(identifiers.TmdbId)
+                && seasonNumber.HasValue
+                && episodeNumber.HasValue;
+            if (canUseLegacySeriesShape)
+            {
+                var episodeTmdbId = GetProviderId(episode, MetadataProvider.Tmdb);
+                var shouldPromote = episode is null
+                    || string.IsNullOrWhiteSpace(episodeTmdbId)
+                    || !string.Equals(episodeTmdbId, identifiers.TmdbId, StringComparison.OrdinalIgnoreCase);
+
+                if (shouldPromote)
+                {
+                    return new PopfeedMappedItem(
+                        "episode",
+                        new PopfeedIdentifiers
+                        {
+                            ImdbId = identifiers.ImdbId,
+                            TmdbId = null,
+                            TmdbTvSeriesId = identifiers.TmdbId,
+                            SeasonNumber = seasonNumber,
+                            EpisodeNumber = episodeNumber,
+                        });
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(identifiers.TmdbId))
             {
                 return new PopfeedMappedItem(
@@ -144,5 +174,17 @@ internal static class PopfeedItemUrlBuilder
         return string.IsNullOrWhiteSpace(fallback)
             ? null
             : fallback;
+    }
+
+    private static string? GetProviderId(IHasProviderIds? item, MetadataProvider provider)
+    {
+        if (item is null)
+        {
+            return null;
+        }
+
+        return item.TryGetProviderId(provider, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
     }
 }
