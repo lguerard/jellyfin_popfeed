@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.2.0",
+        "changelog": "- fix(repair): 🐛 retry on rate limits and defer deletes until replay succeeds",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.2/Jellyfin.Plugin.Popfeed-v0.4.2.zip",
+        "checksum": "baa02aa4526afa359f6931b7bcd0a4ce",
+        "timestamp": "2026-05-30T09:28:34.1597431Z"
+      },
+      {
         "version": "0.4.1.0",
         "changelog": "- fix(api): 🐛 pass user object to GetUserData overload",
         "targetAbi": "10.11.0.0",
