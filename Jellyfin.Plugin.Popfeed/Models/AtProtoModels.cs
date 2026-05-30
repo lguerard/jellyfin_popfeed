@@ -219,6 +219,11 @@ public sealed class PopfeedListItemRecord
     public string? CompletedAt { get; set; }
 
     /// <summary>
+    /// Gets or sets watched episode progress for TV show list items.
+    /// </summary>
+    public List<PopfeedWatchedEpisodeRecord>? WatchedEpisodes { get; set; }
+
+    /// <summary>
     /// Gets or sets the title.
     /// </summary>
     public string? Title { get; set; }
@@ -227,6 +232,27 @@ public sealed class PopfeedListItemRecord
     /// Gets or sets the list type.
     /// </summary>
     public string? ListType { get; set; } = "watched";
+}
+
+/// <summary>
+/// Watched episode entry stored inside a TV-show list item.
+/// </summary>
+public sealed class PopfeedWatchedEpisodeRecord
+{
+    /// <summary>
+    /// Gets or sets the season number.
+    /// </summary>
+    public int SeasonNumber { get; set; }
+
+    /// <summary>
+    /// Gets or sets the episode number.
+    /// </summary>
+    public int EpisodeNumber { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional episode TMDb id.
+    /// </summary>
+    public string? TmdbId { get; set; }
 }
 
 /// <summary>
