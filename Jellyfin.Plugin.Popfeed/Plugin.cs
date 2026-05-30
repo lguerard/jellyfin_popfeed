@@ -7,6 +7,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using Jellyfin.Plugin.Popfeed.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
@@ -178,7 +179,9 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             }
 
             var versionSuffix = directoryName[expectedPrefix.Length..];
-            if (!Version.TryParse(versionSuffix, out var directoryVersion))
+            var versionText = ExtractVersionPrefix(versionSuffix);
+            if (string.IsNullOrWhiteSpace(versionText)
+                || !Version.TryParse(versionText, out var directoryVersion))
             {
                 return null;
             }
@@ -187,6 +190,19 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         }
 
         return null;
+    }
+
+    private static string? ExtractVersionPrefix(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(input, @"^\d+(?:\.\d+){0,3}");
+        return match.Success
+            ? match.Value
+            : null;
     }
 
     private static bool ShouldDeleteDirectory(string directoryName, IReadOnlyCollection<string> prefixes, Version highestInstalledVersion)
