@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Popfeed.Configuration;
@@ -26,6 +28,8 @@ public sealed class PopfeedAtProtoClient
     private const string ListRecordsPath = "/xrpc/com.atproto.repo.listRecords";
     private const string DeleteRecordPath = "/xrpc/com.atproto.repo.deleteRecord";
     private const string UploadBlobPath = "/xrpc/com.atproto.repo.uploadBlob";
+    private const int MaxRequestAttempts = 6;
+    private static readonly Regex _waitForRegex = new(@"wait\s+for\s+(\d+)\s*s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -62,8 +66,10 @@ public sealed class PopfeedAtProtoClient
             password = userConfiguration.AppPassword,
         };
 
-        using var response = await client.PostAsJsonAsync(CreateSessionPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var response = await SendWithRetriesAsync(
+            ct => client.PostAsJsonAsync(CreateSessionPath, request, _jsonOptions, ct),
+            "createSession",
+            cancellationToken).ConfigureAwait(false);
         LogVerbose("ATProto session created successfully for identifier {Identifier}.", userConfiguration.Identifier);
         var session = await response.Content.ReadFromJsonAsync<AtProtoSessionResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
         return session ?? throw new InvalidOperationException("Empty session response.");
@@ -102,8 +108,10 @@ public sealed class PopfeedAtProtoClient
         }
 
         LogVerbose("Listing ATProto records in collection {Collection} from {ServiceUrl}.", collection, serviceUrl);
-        using var response = await client.GetAsync(uriBuilder.ToString(), cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var response = await SendWithRetriesAsync(
+            ct => client.GetAsync(uriBuilder.ToString(), ct),
+            "listRecords",
+            cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadFromJsonAsync<AtProtoListRecordsResponse<TRecord>>(_jsonOptions, cancellationToken).ConfigureAwait(false);
         return body ?? throw new InvalidOperationException("Empty response from listRecords.");
     }
@@ -138,8 +146,10 @@ public sealed class PopfeedAtProtoClient
             _logger.LogInformation("[PopfeedDebug] Creating ATProto record in {Collection}: {Record}", collection, JsonSerializer.Serialize(record, _jsonOptions));
         }
 
-        using var response = await client.PostAsJsonAsync(CreateRecordPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var response = await SendWithRetriesAsync(
+            ct => client.PostAsJsonAsync(CreateRecordPath, request, _jsonOptions, ct),
+            "createRecord",
+            cancellationToken).ConfigureAwait(false);
         LogVerbose("Created ATProto record in collection {Collection} on {ServiceUrl}.", collection, serviceUrl);
         var createResult = await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
         return createResult ?? throw new InvalidOperationException("Empty create record response.");
@@ -178,8 +188,10 @@ public sealed class PopfeedAtProtoClient
             _logger.LogInformation("[PopfeedDebug] Updating ATProto record in {Collection} with rkey {Rkey}: {Record}", collection, rkey, JsonSerializer.Serialize(record, _jsonOptions));
         }
 
-        using var response = await client.PostAsJsonAsync(PutRecordPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var response = await SendWithRetriesAsync(
+            ct => client.PostAsJsonAsync(PutRecordPath, request, _jsonOptions, ct),
+            "putRecord",
+            cancellationToken).ConfigureAwait(false);
         LogVerbose("Updated ATProto record in collection {Collection} on {ServiceUrl}.", collection, serviceUrl);
         var updateResult = await response.Content.ReadFromJsonAsync<AtProtoCreateRecordResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
         return updateResult ?? throw new InvalidOperationException("Empty put record response.");
@@ -202,10 +214,21 @@ public sealed class PopfeedAtProtoClient
         CancellationToken cancellationToken)
     {
         var client = CreateAuthorizedClient(serviceUrl, session.AccessJwt);
-        using var content = new StreamContent(stream);
-        content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
-        using var response = await client.PostAsync(UploadBlobPath, content, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        var initialPosition = stream.CanSeek ? stream.Position : 0;
+        using var response = await SendWithRetriesAsync(
+            async ct =>
+            {
+                if (stream.CanSeek)
+                {
+                    stream.Position = initialPosition;
+                }
+
+                using var content = new StreamContent(stream);
+                content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
+                return await client.PostAsync(UploadBlobPath, content, ct).ConfigureAwait(false);
+            },
+            "uploadBlob",
+            cancellationToken).ConfigureAwait(false);
         var payload = await response.Content.ReadFromJsonAsync<AtProtoUploadBlobResponse>(_jsonOptions, cancellationToken).ConfigureAwait(false);
         return payload?.Blob ?? throw new InvalidOperationException("Empty upload blob response.");
     }
@@ -235,8 +258,10 @@ public sealed class PopfeedAtProtoClient
         };
 
         LogVerbose("Deleting ATProto record from collection {Collection} with rkey {Rkey} on {ServiceUrl}.", collection, rkey, serviceUrl);
-        using var response = await client.PostAsJsonAsync(DeleteRecordPath, request, _jsonOptions, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var response = await SendWithRetriesAsync(
+            ct => client.PostAsJsonAsync(DeleteRecordPath, request, _jsonOptions, ct),
+            "deleteRecord",
+            cancellationToken).ConfigureAwait(false);
     }
 
     private HttpClient CreateClient(string serviceUrl)
@@ -258,15 +283,76 @@ public sealed class PopfeedAtProtoClient
         return serviceUrl.EndsWith("/", StringComparison.Ordinal) ? serviceUrl.TrimEnd('/') : serviceUrl;
     }
 
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendWithRetriesAsync(
+        Func<CancellationToken, Task<HttpResponseMessage>> sendAsync,
+        string operationName,
+        CancellationToken cancellationToken)
     {
-        if (response.IsSuccessStatusCode)
+        for (var attempt = 1; attempt <= MaxRequestAttempts; attempt++)
         {
-            return;
+            var response = await sendAsync(cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                return response;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var statusCode = response.StatusCode;
+
+            if (attempt < MaxRequestAttempts && IsRetryableStatusCode(statusCode))
+            {
+                var delay = GetRetryDelay(response, body, attempt);
+                _logger.LogWarning(
+                    "ATProto {OperationName} failed with {StatusCode} on attempt {Attempt}/{MaxAttempts}. Waiting {DelaySeconds}s before retry. Body: {Body}",
+                    operationName,
+                    (int)statusCode,
+                    attempt,
+                    MaxRequestAttempts,
+                    Math.Ceiling(delay.TotalSeconds),
+                    body);
+                response.Dispose();
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            response.Dispose();
+            throw new HttpRequestException($"ATProto request failed with {(int)statusCode}: {body}");
         }
 
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        throw new HttpRequestException($"ATProto request failed with {(int)response.StatusCode}: {body}");
+        throw new InvalidOperationException($"ATProto request retry loop exhausted for {operationName}.");
+    }
+
+    private static bool IsRetryableStatusCode(HttpStatusCode statusCode)
+    {
+        return statusCode == HttpStatusCode.TooManyRequests
+            || (int)statusCode >= 500;
+    }
+
+    private static TimeSpan GetRetryDelay(HttpResponseMessage response, string body, int attempt)
+    {
+        var headerDelay = response.Headers.RetryAfter?.Delta;
+        if (headerDelay.HasValue && headerDelay.Value > TimeSpan.Zero)
+        {
+            return headerDelay.Value;
+        }
+
+        if (response.Headers.RetryAfter?.Date is DateTimeOffset retryAt)
+        {
+            var untilRetry = retryAt - DateTimeOffset.UtcNow;
+            if (untilRetry > TimeSpan.Zero)
+            {
+                return untilRetry;
+            }
+        }
+
+        var waitForMatch = _waitForRegex.Match(body);
+        if (waitForMatch.Success && int.TryParse(waitForMatch.Groups[1].Value, out var seconds) && seconds > 0)
+        {
+            return TimeSpan.FromSeconds(seconds + 1);
+        }
+
+        var exponentialSeconds = Math.Min(60, (int)Math.Pow(2, attempt));
+        return TimeSpan.FromSeconds(exponentialSeconds);
     }
 
     private void LogVerbose(string message, params object?[] arguments)
