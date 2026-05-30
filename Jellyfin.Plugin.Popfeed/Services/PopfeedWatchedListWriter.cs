@@ -291,6 +291,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 : mappedItem.Identifiers.TmdbId,
         };
 
+        var seriesEpisodes = await LoadSeriesEpisodesFromEpisodeListItemsAsync(
+            userConfiguration,
+            session,
+            watchedListUri,
+            seriesTmdbId,
+            cancellationToken).ConfigureAwait(false);
+
         var tvShowProgressItem = await FindTvShowProgressItemAsync(
             userConfiguration,
             session,
@@ -311,7 +318,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 ListType = watchedListType,
                 AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
                 Title = episode.Series?.Name,
-                WatchedEpisodes = [watchedEpisode],
+                WatchedEpisodes = MergeWatchedEpisodes(seriesEpisodes.ToArray(), [watchedEpisode]),
             };
 
             await _client.CreateRecordAsync(
@@ -331,6 +338,8 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         var watchedEpisodes = existing.WatchedEpisodes is null
             ? new List<PopfeedWatchedEpisodeRecord>()
             : new List<PopfeedWatchedEpisodeRecord>(existing.WatchedEpisodes);
+
+        watchedEpisodes = MergeWatchedEpisodes(watchedEpisodes.ToArray(), seriesEpisodes.ToArray(), [watchedEpisode]);
 
         var existingEpisode = watchedEpisodes.FirstOrDefault(entry =>
             entry.SeasonNumber == watchedEpisode.SeasonNumber
@@ -411,6 +420,92 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         while (!string.IsNullOrWhiteSpace(cursor));
 
         return null;
+    }
+
+    private async Task<List<PopfeedWatchedEpisodeRecord>> LoadSeriesEpisodesFromEpisodeListItemsAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string watchedListUri,
+        string seriesTmdbId,
+        CancellationToken cancellationToken)
+    {
+        var entries = new List<PopfeedWatchedEpisodeRecord>();
+        string? cursor = null;
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(
+                userConfiguration.PdsUrl,
+                session,
+                ListItemCollection,
+                cursor,
+                cancellationToken).ConfigureAwait(false);
+
+            foreach (var record in page.Records)
+            {
+                var value = record.Value;
+                if (value is null
+                    || !string.Equals(value.ListUri, watchedListUri, StringComparison.Ordinal)
+                    || (!string.Equals(value.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(value.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
+                    || !value.Identifiers.SeasonNumber.HasValue
+                    || !value.Identifiers.EpisodeNumber.HasValue)
+                {
+                    continue;
+                }
+
+                var entrySeriesId = !string.IsNullOrWhiteSpace(value.Identifiers.TmdbTvSeriesId)
+                    ? value.Identifiers.TmdbTvSeriesId
+                    : value.Identifiers.TmdbId;
+                if (!string.Equals(entrySeriesId, seriesTmdbId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                entries.Add(new PopfeedWatchedEpisodeRecord
+                {
+                    SeasonNumber = value.Identifiers.SeasonNumber.Value,
+                    EpisodeNumber = value.Identifiers.EpisodeNumber.Value,
+                    TmdbId = value.Identifiers.TmdbId,
+                });
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        return entries;
+    }
+
+    private static List<PopfeedWatchedEpisodeRecord> MergeWatchedEpisodes(params PopfeedWatchedEpisodeRecord[][] episodeSets)
+    {
+        var merged = new List<PopfeedWatchedEpisodeRecord>();
+        foreach (var set in episodeSets)
+        {
+            foreach (var episode in set)
+            {
+                var existing = merged.FirstOrDefault(entry =>
+                    entry.SeasonNumber == episode.SeasonNumber
+                    && entry.EpisodeNumber == episode.EpisodeNumber);
+                if (existing is null)
+                {
+                    merged.Add(new PopfeedWatchedEpisodeRecord
+                    {
+                        SeasonNumber = episode.SeasonNumber,
+                        EpisodeNumber = episode.EpisodeNumber,
+                        TmdbId = episode.TmdbId,
+                    });
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(existing.TmdbId)
+                    && !string.IsNullOrWhiteSpace(episode.TmdbId))
+                {
+                    existing.TmdbId = episode.TmdbId;
+                }
+            }
+        }
+
+        return merged;
     }
 
     private static string? GetProviderId(Episode? episode, MetadataProvider provider)
