@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.21.0",
+        "changelog": "- fix(popfeed): 🐛 use episode type for watched compatibility",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.21/Jellyfin.Plugin.Popfeed-v0.4.21.zip",
+        "checksum": "215467466e4b8981a45305babb6d7eb7",
+        "timestamp": "2026-05-30T13:24:06.5020732Z"
+      },
+      {
         "version": "0.4.20.0",
         "changelog": "- fix(watched): 🐛 align listItem listType with list",
         "targetAbi": "10.11.0.0",
