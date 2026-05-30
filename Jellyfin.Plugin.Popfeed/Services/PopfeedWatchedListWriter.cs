@@ -95,8 +95,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             {
                 // An existing list item was found; update it only if something meaningful changed.
                 var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played);
+                var shouldForceCanonicalEpisodeRefresh = !needsUpdate
+                    && string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(existingListItem.Value.Identifiers.TmdbTvSeriesId)
+                    && existingListItem.Value.Identifiers.SeasonNumber.HasValue
+                    && existingListItem.Value.Identifiers.EpisodeNumber.HasValue;
 
-                if (needsUpdate)
+                if (needsUpdate || shouldForceCanonicalEpisodeRefresh)
                 {
                     existingListItem.Value.Identifiers = mappedItem.Identifiers;
                     existingListItem.Value.CreativeWorkType = mappedItem.CreativeWorkType;
@@ -115,7 +120,14 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                         GetRecordKey(existingListItem.Uri),
                         existingListItem.Value,
                         cancellationToken).ConfigureAwait(false);
-                    _logger.LogInformation("Updated watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
+                    if (needsUpdate)
+                    {
+                        _logger.LogInformation("Updated watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Refreshed canonical watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
+                    }
                 }
                 else
                 {
