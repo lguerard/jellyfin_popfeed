@@ -162,12 +162,14 @@ public sealed class PopfeedSyncService
 
         if (item is Episode episode && episode.Series is not null && episode.IndexNumber.HasValue)
         {
-            var tmdbTvSeriesId = GetEpisodeSeriesTmdbId(episode);
+            var tmdbTvSeriesId = GetProviderId(episode.Series, MetadataProvider.Tmdb);
             var episodeTmdbId = GetProviderId(episode, MetadataProvider.Tmdb);
             var identifiers = new PopfeedIdentifiers
             {
                 ImdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId) ? GetProviderId(episode, MetadataProvider.Imdb) : null,
-                TmdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId) ? episodeTmdbId : null,
+                // Keep the episode-level TMDb id when available. Popfeed uses this
+                // to resolve the exact episode entity and avoid series-level fallback links.
+                TmdbId = episodeTmdbId,
                 TmdbTvSeriesId = tmdbTvSeriesId,
                 SeasonNumber = episode.ParentIndexNumber,
                 EpisodeNumber = episode.IndexNumber,
@@ -196,26 +198,6 @@ public sealed class PopfeedSyncService
     {
         return item.TryGetProviderId(provider, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
-            : null;
-    }
-
-    /// <summary>
-    /// Returns the TMDb series id for an episode, falling back to the episode-level
-    /// TMDb id for libraries that only expose it on the episode rather than the series.
-    /// </summary>
-    /// <param name="episode">The episode.</param>
-    /// <returns>The series TMDb id, or null when unavailable.</returns>
-    private static string? GetEpisodeSeriesTmdbId(Episode episode)
-    {
-        var seriesTmdbId = GetProviderId(episode.Series!, MetadataProvider.Tmdb);
-        if (!string.IsNullOrWhiteSpace(seriesTmdbId))
-        {
-            return seriesTmdbId;
-        }
-
-        // Some libraries only expose the parent show's TMDb id on the episode itself.
-        return episode.ParentIndexNumber.HasValue && episode.IndexNumber.HasValue
-            ? GetProviderId(episode, MetadataProvider.Tmdb)
             : null;
     }
 

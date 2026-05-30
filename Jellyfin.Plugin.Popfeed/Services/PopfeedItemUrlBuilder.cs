@@ -26,7 +26,7 @@ internal static class PopfeedItemUrlBuilder
         if (mappedItem.CreativeWorkType == "tv_episode")
         {
             var episode = sourceItem as Episode;
-            var tvSeriesId = FirstNonEmpty(identifiers.TmdbTvSeriesId, identifiers.TmdbId);
+            var tvSeriesId = identifiers.TmdbTvSeriesId;
             var seasonNumber = identifiers.SeasonNumber ?? episode?.ParentIndexNumber;
             var episodeNumber = identifiers.EpisodeNumber ?? episode?.IndexNumber;
 
@@ -39,8 +39,25 @@ internal static class PopfeedItemUrlBuilder
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
+                        TmdbId = identifiers.TmdbId,
                         TmdbTvSeriesId = tvSeriesId,
-                        TmdbId = null,
+                        SeasonNumber = seasonNumber,
+                        EpisodeNumber = episodeNumber,
+                    });
+            }
+
+            // Do not promote TmdbId into TmdbTvSeriesId for episodes.
+            // TmdbId is the episode id and must keep routing to /episode/{id}
+            // instead of being misinterpreted as a series id.
+            if (!string.IsNullOrWhiteSpace(identifiers.TmdbId))
+            {
+                return new PopfeedMappedItem(
+                    "episode",
+                    new PopfeedIdentifiers
+                    {
+                        ImdbId = identifiers.ImdbId,
+                        TmdbId = identifiers.TmdbId,
+                        TmdbTvSeriesId = null,
                         SeasonNumber = seasonNumber,
                         EpisodeNumber = episodeNumber,
                     });
@@ -91,6 +108,8 @@ internal static class PopfeedItemUrlBuilder
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue
                 => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
+            "episode" or "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
+                => $"https://popfeed.social/episode/{Uri.EscapeDataString(identifiers.TmdbId)}",
             "tv_season" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
                 && identifiers.SeasonNumber.HasValue
                 => $"https://popfeed.social/season?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}",

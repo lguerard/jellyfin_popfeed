@@ -225,17 +225,17 @@ public sealed class PopfeedEpisodeIdentifierTests
     }
 
     /// <summary>
-    /// An episode item with canonical identifiers (TmdbTvSeriesId + season + episode) must
-    /// produce the <c>https://popfeed.social/episode?tvId=…</c> URL.
+    /// An episode item with canonical series coordinates must use the query route.
     /// </summary>
     [Fact]
-    public void BuildItemUrl_UsesCanonicalEpisodePath()
+    public void BuildItemUrl_PrefersCanonicalEpisodeQueryPath()
     {
         var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(
             new PopfeedMappedItem(
                 "tv_episode",
                 new PopfeedIdentifiers
                 {
+                    TmdbId = "7239719",
                     TmdbTvSeriesId = "67997",
                     SeasonNumber = 33,
                     EpisodeNumber = 22,
@@ -258,6 +258,7 @@ public sealed class PopfeedEpisodeIdentifierTests
                 "tv_episode",
                 new PopfeedIdentifiers
                 {
+                    TmdbId = "6617364",
                     TmdbTvSeriesId = "97546",
                     SeasonNumber = 3,
                     EpisodeNumber = 4,
@@ -269,19 +270,18 @@ public sealed class PopfeedEpisodeIdentifierTests
     }
 
     /// <summary>
-    /// A legacy episode shape (TmdbId instead of TmdbTvSeriesId) must be automatically
-    /// normalised and produce the correct canonical episode URL.
-    /// Previously the builder returned null for this shape; it now normalises it.
+    /// When only canonical tv-series coordinates are available, URL building must
+    /// still fall back to the query-string episode route.
     /// </summary>
     [Fact]
-    public void BuildItemUrl_NormalizesLegacyEpisodeShapeToCanonicalUrl()
+    public void BuildItemUrl_FallsBackToCanonicalQueryWhenEpisodeTmdbIdMissing()
     {
         var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(
             new PopfeedMappedItem(
                 "tv_episode",
                 new PopfeedIdentifiers
                 {
-                    TmdbId = "67997",
+                    TmdbTvSeriesId = "67997",
                     SeasonNumber = 33,
                     EpisodeNumber = 22,
                 }));
@@ -292,12 +292,81 @@ public sealed class PopfeedEpisodeIdentifierTests
     }
 
     /// <summary>
-    /// A legacy episode shape (TmdbId) must be rewritten by
-    /// <see cref="PopfeedItemUrlBuilder.NormalizeMappedItem"/> so that
-    /// <c>TmdbTvSeriesId</c> is populated and <c>TmdbId</c> is cleared.
+    /// When only the episode TMDb id exists, URL building must use /episode/{id}
+    /// and must never reinterpret that id as a tv-series id.
     /// </summary>
     [Fact]
-    public void NormalizeMappedItem_RewritesLegacyEpisodeShape()
+    public void BuildItemUrl_UsesEpisodePathWhenOnlyEpisodeTmdbIdIsPresent()
+    {
+        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(
+            new PopfeedMappedItem(
+                "tv_episode",
+                new PopfeedIdentifiers
+                {
+                    TmdbId = "4556",
+                }));
+
+        Assert.Equal("https://popfeed.social/episode/4556", itemUrl);
+    }
+
+    /// <summary>
+    /// A mapped episode that already includes canonical tv-series coordinates must
+    /// keep those values unchanged after normalisation.
+    /// </summary>
+    [Fact]
+    public void NormalizeMappedItem_LeavesCanonicalEpisodeShapeIntact()
+    {
+        var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(
+            new PopfeedMappedItem(
+                "tv_episode",
+                new PopfeedIdentifiers
+                {
+                    TmdbId = "7239719",
+                    TmdbTvSeriesId = "67997",
+                    SeasonNumber = 1,
+                    EpisodeNumber = 1,
+                }));
+
+        Assert.Equal("episode", normalized.CreativeWorkType);
+        Assert.Equal("67997", normalized.Identifiers.TmdbTvSeriesId);
+        Assert.Equal("7239719", normalized.Identifiers.TmdbId);
+        Assert.Equal(1, normalized.Identifiers.SeasonNumber);
+        Assert.Equal(1, normalized.Identifiers.EpisodeNumber);
+    }
+
+    /// <summary>
+    /// Normalisation must preserve episode-level identifiers while URL building still
+    /// prefers canonical series coordinates when present.
+    /// </summary>
+    [Fact]
+    public void NormalizeAndBuildItemUrl_PrefersCanonicalQueryWhenSeriesCoordinatesExist()
+    {
+        var mapped = new PopfeedMappedItem(
+            "tv_episode",
+            new PopfeedIdentifiers
+            {
+                TmdbId = "7239719",
+                TmdbTvSeriesId = "67997",
+                SeasonNumber = 33,
+                EpisodeNumber = 19,
+            });
+
+        var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(mapped);
+        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(mapped);
+
+        Assert.Equal("7239719", normalized.Identifiers.TmdbId);
+        Assert.Equal("67997", normalized.Identifiers.TmdbTvSeriesId);
+        Assert.Equal(
+            "https://popfeed.social/episode?tvId=67997&seasonNumber=33&episodeNumber=19",
+            itemUrl);
+    }
+
+    /// <summary>
+    /// Episode normalization must not promote an episode TMDb id into
+    /// TmdbTvSeriesId, otherwise all entries can collapse to a wrong series URL.
+    /// </summary>
+    [Fact]
+    public void NormalizeMappedItem_DoesNotPromoteEpisodeTmdbIdToSeriesId()
     {
         var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(
             new PopfeedMappedItem(
@@ -310,36 +379,49 @@ public sealed class PopfeedEpisodeIdentifierTests
                 }));
 
         Assert.Equal("episode", normalized.CreativeWorkType);
-        Assert.Equal("4556", normalized.Identifiers.TmdbTvSeriesId);
-        Assert.Null(normalized.Identifiers.TmdbId);
+        Assert.Equal("4556", normalized.Identifiers.TmdbId);
+        Assert.Null(normalized.Identifiers.TmdbTvSeriesId);
         Assert.Equal(1, normalized.Identifiers.SeasonNumber);
         Assert.Equal(1, normalized.Identifiers.EpisodeNumber);
     }
 
     /// <summary>
-    /// Normalisation and URL building must both produce the same canonical episode shape
-    /// from a legacy identifier input, confirming that Popfeed scrobbling and Bluesky
-    /// posting resolve the same URL.
+    /// When a new poster blob is available, merge must prefer it so stale images
+    /// are replaced on subsequent syncs.
     /// </summary>
     [Fact]
-    public void NormalizeAndBuildItemUrl_ProduceSameCanonicalEpisodeShape()
+    public void MergeExistingReview_PrefersDesiredPosterWhenPresent()
     {
-        var mapped = new PopfeedMappedItem(
-            "tv_episode",
-            new PopfeedIdentifiers
+        var existing = new PopfeedReviewRecord
+        {
+            Poster = new AtProtoBlob
             {
-                TmdbId = "4556",
-                SeasonNumber = 1,
-                EpisodeNumber = 1,
-            });
+                Ref = new AtProtoLink { Link = "oldCid" },
+                MimeType = "image/jpeg",
+            },
+            PosterUrl = "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:test/oldCid@jpeg",
+            Identifiers = new PopfeedIdentifiers { TmdbId = "1" },
+            CreativeWorkType = "movie",
+            Tags = ["jellyfin", "watched"],
+        };
 
-        var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(mapped);
-        var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(mapped);
+        var desired = new PopfeedReviewRecord
+        {
+            Poster = new AtProtoBlob
+            {
+                Ref = new AtProtoLink { Link = "newCid" },
+                MimeType = "image/jpeg",
+            },
+            PosterUrl = "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:test/newCid@jpeg",
+            Identifiers = new PopfeedIdentifiers { TmdbId = "1" },
+            CreativeWorkType = "movie",
+            Tags = ["jellyfin", "watched"],
+        };
 
-        Assert.Equal("4556", normalized.Identifiers.TmdbTvSeriesId);
-        Assert.Equal(
-            "https://popfeed.social/episode?tvId=4556&seasonNumber=1&episodeNumber=1",
-            itemUrl);
+        var merged = PopfeedWatchedListWriter.MergeExistingReview(existing, desired);
+
+        Assert.Equal("newCid", merged.Poster?.Ref.Link);
+        Assert.Equal(desired.PosterUrl, merged.PosterUrl);
     }
 
     /// <summary>
