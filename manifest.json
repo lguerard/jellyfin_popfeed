@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.24.0",
+        "changelog": "- fix(watched): 🐛 sync tv_show watchedEpisodes",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.24/Jellyfin.Plugin.Popfeed-v0.4.24.zip",
+        "checksum": "4503c465019d4a1a24ad162c91ef2c5d",
+        "timestamp": "2026-05-30T14:02:03.1478577Z"
+      },
+      {
         "version": "0.4.23.0",
         "changelog": "- fix(popfeed): 🐛 restore episode links and watched sync",
         "targetAbi": "10.11.0.0",
