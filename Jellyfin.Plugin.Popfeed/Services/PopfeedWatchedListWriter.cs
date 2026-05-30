@@ -61,7 +61,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
         var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
         var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
-        var existingListItem = await FindExistingListItemAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
+        var matchingListItems = await FindMatchingListItemsAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
+        var existingListItem = SelectPreferredListItem(matchingListItems, mappedItem);
+        var duplicateListItems = existingListItem is null
+            ? Array.Empty<AtProtoRecord<PopfeedListItemRecord>>()
+            : matchingListItems
+                .Where(candidate => !string.Equals(candidate.Uri, existingListItem.Uri, StringComparison.Ordinal))
+                .ToArray();
 
         if (played || inProgress)
         {
@@ -111,6 +117,22 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                         cancellationToken).ConfigureAwait(false);
                     _logger.LogInformation("Updated watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
                 }
+                else
+                {
+                    LogVerbose("Keeping existing watched list item unchanged for {ItemName}; identifiers already canonical.", title);
+                }
+            }
+
+            foreach (var duplicateListItem in duplicateListItems)
+            {
+                var duplicateRkey = GetRecordKey(duplicateListItem.Uri);
+                await _client.DeleteRecordAsync(
+                    userConfiguration.PdsUrl,
+                    session,
+                    ListItemCollection,
+                    duplicateRkey,
+                    cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Removed duplicate watched list item {ListItemUri} for {ItemName} on account {Identifier}.", duplicateListItem.Uri, title, userConfiguration.Identifier);
             }
 
             if (existingRecord is not null)
@@ -311,33 +333,65 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
     /// <param name="identifiers">The identifiers to match.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The matching record, or null when absent.</returns>
-    private async Task<AtProtoRecord<PopfeedListItemRecord>?> FindExistingListItemAsync(
+    private async Task<AtProtoRecord<PopfeedListItemRecord>[]> FindMatchingListItemsAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
         string watchedListUri,
         PopfeedIdentifiers identifiers,
         CancellationToken cancellationToken)
     {
+        var matches = new List<AtProtoRecord<PopfeedListItemRecord>>();
         string? cursor = null;
         do
         {
             var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(userConfiguration.PdsUrl, session, ListItemCollection, cursor, cancellationToken).ConfigureAwait(false);
-            var match = page.Records.FirstOrDefault(record =>
+            matches.AddRange(page.Records.Where(record =>
                 record.Value is not null
                 && string.Equals(record.Value.ListUri, watchedListUri, StringComparison.Ordinal)
-                && record.Value.Identifiers.Matches(identifiers));
-
-            if (match is not null)
-            {
-                LogVerbose("Found matching watched list item for identifiers in list {WatchedListUri}.", watchedListUri);
-                return match;
-            }
+                && record.Value.Identifiers.Matches(identifiers)));
 
             cursor = page.Cursor;
         }
         while (!string.IsNullOrWhiteSpace(cursor));
 
-        return null;
+        if (matches.Count > 0)
+        {
+            LogVerbose("Found {MatchCount} matching watched list item(s) in list {WatchedListUri}.", matches.Count, watchedListUri);
+        }
+
+        return matches.ToArray();
+    }
+
+    private static AtProtoRecord<PopfeedListItemRecord>? SelectPreferredListItem(
+        IReadOnlyCollection<AtProtoRecord<PopfeedListItemRecord>> matches,
+        PopfeedMappedItem mappedItem)
+    {
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        var exact = matches.FirstOrDefault(candidate =>
+            candidate.Value is not null
+            && candidate.Value.Identifiers.HasSameValues(mappedItem.Identifiers)
+            && string.Equals(candidate.Value.CreativeWorkType, mappedItem.CreativeWorkType, StringComparison.Ordinal));
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        var canonicalEpisode = matches.FirstOrDefault(candidate =>
+            candidate.Value is not null
+            && string.Equals(candidate.Value.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(candidate.Value.Identifiers.TmdbTvSeriesId)
+            && candidate.Value.Identifiers.SeasonNumber.HasValue
+            && candidate.Value.Identifiers.EpisodeNumber.HasValue);
+        if (canonicalEpisode is not null)
+        {
+            return canonicalEpisode;
+        }
+
+        return matches.First();
     }
 
     /// <summary>
