@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.14.0",
+        "changelog": "- fix(url): 🐛 canonicalize legacy episode links",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.14/Jellyfin.Plugin.Popfeed-v0.4.14.zip",
+        "checksum": "9809c425cd5dedf39e1535e5592a23ae",
+        "timestamp": "2026-05-30T12:33:37.3228667Z"
+      },
+      {
         "version": "0.4.13.0",
         "changelog": "- fix(repair): 🐛 avoid deleting corrected list item\r\n- fix(plugin): 🐛 harden stale folder cleanup on Windows",
         "targetAbi": "10.11.0.0",
