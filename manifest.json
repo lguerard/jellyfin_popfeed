@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.10.0",
+        "changelog": "- fix(repair): 🐛 prevent internal errors and match by identifiers",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.10/Jellyfin.Plugin.Popfeed-v0.4.10.zip",
+        "checksum": "cb4ca730654097052ff82d7f463a004d",
+        "timestamp": "2026-05-30T10:53:11.1733553Z"
+      },
+      {
         "version": "0.4.9.0",
         "changelog": "- fix(sync): 🐛 remove episode tmdbId in canonical writes",
         "targetAbi": "10.11.0.0",
