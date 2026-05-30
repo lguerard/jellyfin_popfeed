@@ -76,6 +76,86 @@ public sealed class PopfeedTestSyncRequest
 }
 
 /// <summary>
+/// Request payload for repairing incorrect recent TV episode activities.
+/// </summary>
+public sealed class PopfeedRepairEpisodesRequest
+{
+    /// <summary>
+    /// Gets or sets the Jellyfin user id.
+    /// </summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of latest episode activities to repair.
+    /// When greater than zero, marker-title mode is ignored and only the
+    /// latest N episode matches are repaired.
+    /// </summary>
+    public int LatestMatchesCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the marker title. Episode activities newer than the latest
+    /// matching review are considered for repair.
+    /// </summary>
+    public string MarkerTitle { get; set; } = "Project Hail Mary";
+
+    /// <summary>
+    /// Gets or sets the maximum number of watched episodes to replay.
+    /// </summary>
+    public int MaxReplayItems { get; set; } = 200;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to only simulate changes.
+    /// </summary>
+    public bool DryRun { get; set; } = false;
+}
+
+/// <summary>
+/// Result payload for the episode repair endpoint.
+/// </summary>
+public sealed class PopfeedRepairEpisodesResult
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the operation completed.
+    /// </summary>
+    public bool Success { get; set; }
+
+    /// <summary>
+    /// Gets or sets a human-readable message.
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the marker timestamp used for the repair window.
+    /// </summary>
+    public DateTimeOffset? MarkerTimestampUtc { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of episode review records identified as wrong.
+    /// </summary>
+    public int WrongReviewCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of wrong review records deleted.
+    /// </summary>
+    public int DeletedWrongReviews { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of watched episodes selected for replay.
+    /// </summary>
+    public int ReplayCandidateCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of replay syncs attempted.
+    /// </summary>
+    public int ReplayAttempted { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of replay syncs that succeeded.
+    /// </summary>
+    public int ReplaySucceeded { get; set; }
+}
+
+/// <summary>
 /// Test sync result returned to the settings page.
 /// </summary>
 public sealed class PopfeedSyncTestResult
