@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.17.0",
+        "changelog": "- fix(list): 🐛 force refresh canonical episode items",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.17/Jellyfin.Plugin.Popfeed-v0.4.17.zip",
+        "checksum": "b8b410730294fafb0cad19504661f2aa",
+        "timestamp": "2026-05-30T12:51:23.3955112Z"
+      },
+      {
         "version": "0.4.16.0",
         "changelog": "- fix(list): 🐛 dedupe stale episode list items",
         "targetAbi": "10.11.0.0",
