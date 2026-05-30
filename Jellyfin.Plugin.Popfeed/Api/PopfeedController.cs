@@ -623,8 +623,8 @@ public sealed class PopfeedController : ControllerBase
             return false;
         }
 
-        var seriesTmdb = GetProviderId(episode.Series, MetadataProvider.Tmdb);
-        var episodeTmdb = GetProviderId(episode, MetadataProvider.Tmdb);
+        var seriesTmdb = GetProviderId(episode.Series, MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
+        var episodeTmdb = GetProviderId(episode, MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
         var reviewSeriesId = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
             ? identifiers.TmdbTvSeriesId
             : (identifiers.SeasonNumber.HasValue && identifiers.EpisodeNumber.HasValue ? identifiers.TmdbId : null);
@@ -644,7 +644,7 @@ public sealed class PopfeedController : ControllerBase
             && string.Equals(episodeTmdb, identifiers.TmdbId, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? GetProviderId(IHasProviderIds? item, MetadataProvider provider)
+    private static string? GetProviderId(IHasProviderIds? item, MediaBrowser.Model.Entities.MetadataProvider provider)
     {
         if (item is null)
         {
