@@ -7,6 +7,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using Jellyfin.Plugin.Popfeed.Configuration;
 using MediaBrowser.Common.Configuration;
@@ -278,11 +279,12 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             "$targetPid={0}; try {{ Wait-Process -Id $targetPid -ErrorAction SilentlyContinue }} catch {{ }}; $paths=@({1}); foreach ($path in $paths) {{ if (Test-Path -LiteralPath $path) {{ Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue }} }}",
             processId,
             paths);
+        var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
 
         var startInfo = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -Command " + command,
+            Arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + encodedCommand,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
