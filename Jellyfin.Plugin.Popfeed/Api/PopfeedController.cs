@@ -204,75 +204,79 @@ public sealed class PopfeedController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PopfeedRepairEpisodesResult>> RepairEpisodeActivities([FromBody] PopfeedRepairEpisodesRequest request, CancellationToken cancellationToken)
     {
-        if (request.UserId == Guid.Empty)
+        try
         {
-            return BadRequest(new PopfeedRepairEpisodesResult
+            if (request.UserId == Guid.Empty)
             {
-                Success = false,
-                Message = "A valid Jellyfin user id is required.",
-            });
-        }
-
-        var latestMatchesCount = Math.Clamp(request.LatestMatchesCount, 0, 500);
-        var replayLatestJellyfinEpisodesCount = Math.Clamp(request.ReplayLatestJellyfinEpisodesCount, 0, 500);
-        var useReplayLatestJellyfinMode = replayLatestJellyfinEpisodesCount > 0;
-        var useLatestCountMode = !useReplayLatestJellyfinMode && latestMatchesCount > 0;
-        var markerTitle = string.IsNullOrWhiteSpace(request.MarkerTitle)
-            ? "Project Hail Mary"
-            : request.MarkerTitle.Trim();
-        var maxReplayItems = Math.Clamp(request.MaxReplayItems, 1, 1000);
-
-        var userConfiguration = Plugin.Instance.Configuration.GetUserConfiguration(request.UserId);
-        if (userConfiguration is null || !userConfiguration.IsConfigured())
-        {
-            return BadRequest(new PopfeedRepairEpisodesResult
-            {
-                Success = false,
-                Message = "No configured Popfeed mapping exists for this Jellyfin user.",
-            });
-        }
-
-        var result = new PopfeedRepairEpisodesResult();
-
-        var session = await _atProtoClient.CreateSessionAsync(userConfiguration, cancellationToken).ConfigureAwait(false);
-        var allReviews = await LoadAllReviewRecordsAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
-
-        (AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)[] wrongEpisodeReviews;
-        (AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)[] wrongEpisodeListItems;
-        (Episode Episode, DateTimeOffset PlayedAtUtc)[] watchedEpisodes;
-
-        if (useReplayLatestJellyfinMode)
-        {
-            wrongEpisodeReviews = Array.Empty<(AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)>();
-            wrongEpisodeListItems = Array.Empty<(AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)>();
-            watchedEpisodes = GetLatestWatchedEpisodes(request.UserId, replayLatestJellyfinEpisodesCount)
-                .OrderBy(entry => entry.PlayedAtUtc)
-                .ToArray();
-        }
-        else if (useLatestCountMode)
-        {
-            wrongEpisodeReviews = Array.Empty<(AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)>();
-            var allListItems = await LoadAllListItemRecordsAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
-            wrongEpisodeListItems = allListItems
-                .Where(record => record.Value is not null && IsEpisodeListItem(record.Value))
-                .Select(record => new
+                return BadRequest(new PopfeedRepairEpisodesResult
                 {
-                    Record = record,
-                    CreatedAt = ParseListItemTimestamp(record.Value),
-                })
-                .Where(entry => entry.CreatedAt.HasValue)
-                .OrderByDescending(entry => entry.CreatedAt)
-                .Take(latestMatchesCount)
-                .OrderBy(entry => entry.CreatedAt)
-                .Select(entry => (entry.Record, entry.CreatedAt!.Value))
-                .ToArray();
+                    Success = false,
+                    Message = "A valid Jellyfin user id is required.",
+                });
+            }
 
-            watchedEpisodes = Array.Empty<(Episode Episode, DateTimeOffset PlayedAtUtc)>();
-        }
-        else
-        {
-            wrongEpisodeListItems = Array.Empty<(AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)>();
-            var marker = allReviews
+            var latestMatchesCount = Math.Clamp(request.LatestMatchesCount, 0, 500);
+            var replayLatestJellyfinEpisodesCount = Math.Clamp(request.ReplayLatestJellyfinEpisodesCount, 0, 500);
+            var useReplayLatestJellyfinMode = replayLatestJellyfinEpisodesCount > 0;
+            var useLatestCountMode = !useReplayLatestJellyfinMode && latestMatchesCount > 0;
+            var markerTitle = string.IsNullOrWhiteSpace(request.MarkerTitle)
+                ? "Project Hail Mary"
+                : request.MarkerTitle.Trim();
+            var maxReplayItems = Math.Clamp(request.MaxReplayItems, 1, 1000);
+
+            var userConfiguration = Plugin.Instance.Configuration.GetUserConfiguration(request.UserId);
+            if (userConfiguration is null || !userConfiguration.IsConfigured())
+            {
+                return BadRequest(new PopfeedRepairEpisodesResult
+                {
+                    Success = false,
+                    Message = "No configured Popfeed mapping exists for this Jellyfin user.",
+                });
+            }
+
+            var result = new PopfeedRepairEpisodesResult();
+
+            var session = await _atProtoClient.CreateSessionAsync(userConfiguration, cancellationToken).ConfigureAwait(false);
+            var allReviews = useReplayLatestJellyfinMode
+                ? new System.Collections.Generic.List<AtProtoRecord<PopfeedReviewRecord>>()
+                : await LoadAllReviewRecordsAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
+
+            (AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)[] wrongEpisodeReviews;
+            (AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)[] wrongEpisodeListItems;
+            (Episode Episode, DateTimeOffset PlayedAtUtc)[] watchedEpisodes;
+
+            if (useReplayLatestJellyfinMode)
+            {
+                wrongEpisodeReviews = Array.Empty<(AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)>();
+                wrongEpisodeListItems = Array.Empty<(AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)>();
+                watchedEpisodes = GetLatestWatchedEpisodes(request.UserId, replayLatestJellyfinEpisodesCount)
+                    .OrderBy(entry => entry.PlayedAtUtc)
+                    .ToArray();
+            }
+            else if (useLatestCountMode)
+            {
+                wrongEpisodeReviews = Array.Empty<(AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)>();
+                var allListItems = await LoadAllListItemRecordsAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
+                wrongEpisodeListItems = allListItems
+                    .Where(record => record.Value is not null && IsEpisodeListItem(record.Value))
+                    .Select(record => new
+                    {
+                        Record = record,
+                        CreatedAt = ParseListItemTimestamp(record.Value),
+                    })
+                    .Where(entry => entry.CreatedAt.HasValue)
+                    .OrderByDescending(entry => entry.CreatedAt)
+                    .Take(latestMatchesCount)
+                    .OrderBy(entry => entry.CreatedAt)
+                    .Select(entry => (entry.Record, entry.CreatedAt!.Value))
+                    .ToArray();
+
+                watchedEpisodes = Array.Empty<(Episode Episode, DateTimeOffset PlayedAtUtc)>();
+            }
+            else
+            {
+                wrongEpisodeListItems = Array.Empty<(AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)>();
+                var marker = allReviews
                 .Where(record => record.Value is not null && !string.IsNullOrWhiteSpace(record.Value.Title))
                 .Select(record => new
                 {
@@ -284,19 +288,19 @@ public sealed class PopfeedController : ControllerBase
                 .OrderByDescending(entry => entry.CreatedAt)
                 .FirstOrDefault();
 
-            if (marker is null)
-            {
-                return NotFound(new PopfeedRepairEpisodesResult
+                if (marker is null)
                 {
-                    Success = false,
-                    Message = $"Could not find marker review title '{markerTitle}' in Popfeed records.",
-                });
-            }
+                    return NotFound(new PopfeedRepairEpisodesResult
+                    {
+                        Success = false,
+                        Message = $"Could not find marker review title '{markerTitle}' in Popfeed records.",
+                    });
+                }
 
-            var markerTimestampUtc = marker.CreatedAt!.Value;
-            result.MarkerTimestampUtc = markerTimestampUtc;
+                var markerTimestampUtc = marker.CreatedAt!.Value;
+                result.MarkerTimestampUtc = markerTimestampUtc;
 
-            wrongEpisodeReviews = allReviews
+                wrongEpisodeReviews = allReviews
                 .Where(record => record.Value is not null)
                 .Select(record => new
                 {
@@ -310,52 +314,52 @@ public sealed class PopfeedController : ControllerBase
                 .Select(entry => (entry.Record, entry.CreatedAt!.Value))
                 .ToArray();
 
-            watchedEpisodes = GetWatchedEpisodesSince(request.UserId, markerTimestampUtc)
-                .OrderBy(entry => entry.PlayedAtUtc)
-                .Take(maxReplayItems)
-                .ToArray();
-        }
+                watchedEpisodes = GetWatchedEpisodesSince(request.UserId, markerTimestampUtc)
+                    .OrderBy(entry => entry.PlayedAtUtc)
+                    .Take(maxReplayItems)
+                    .ToArray();
+            }
 
-        result.WrongReviewCount = useLatestCountMode
-            ? wrongEpisodeListItems.Length
-            : wrongEpisodeReviews.Length;
+            result.WrongReviewCount = useLatestCountMode
+                ? wrongEpisodeListItems.Length
+                : wrongEpisodeReviews.Length;
 
-        var latestRepairPlan = useLatestCountMode
-            ? BuildLatestRepairPlanFromListItems(request.UserId, wrongEpisodeListItems)
-            : Array.Empty<(AtProtoRecord<PopfeedListItemRecord> WrongListItem, Episode Episode, DateTimeOffset PlayedAtUtc)>();
+            var latestRepairPlan = useLatestCountMode
+                ? BuildLatestRepairPlanFromListItems(request.UserId, wrongEpisodeListItems)
+                : Array.Empty<(AtProtoRecord<PopfeedListItemRecord> WrongListItem, Episode Episode, DateTimeOffset PlayedAtUtc)>();
 
-        result.ReplayCandidateCount = useLatestCountMode
-            ? latestRepairPlan.Length
-            : watchedEpisodes.Length;
-        result.ReplayEpisodes = useLatestCountMode
-            ? latestRepairPlan
-                .Select(entry => BuildReplayPreview(
-                    entry.Episode,
-                    entry.PlayedAtUtc,
-                    entry.WrongListItem.Uri,
-                    true))
-                .ToArray()
-            : watchedEpisodes
-                .Select(entry => BuildReplayPreview(
-                    entry.Episode,
-                    entry.PlayedAtUtc,
-                    null,
-                    false))
-                .ToArray();
+            result.ReplayCandidateCount = useLatestCountMode
+                ? latestRepairPlan.Length
+                : watchedEpisodes.Length;
+            result.ReplayEpisodes = useLatestCountMode
+                ? latestRepairPlan
+                    .Select(entry => BuildReplayPreview(
+                        entry.Episode,
+                        entry.PlayedAtUtc,
+                        entry.WrongListItem.Uri,
+                        true))
+                    .ToArray()
+                : watchedEpisodes
+                    .Select(entry => BuildReplayPreview(
+                        entry.Episode,
+                        entry.PlayedAtUtc,
+                        null,
+                        false))
+                    .ToArray();
 
-        if (request.DryRun)
-        {
-            result.Success = true;
-            result.Message = useReplayLatestJellyfinMode
-                ? $"Dry run: found {result.ReplayCandidateCount} latest Jellyfin watched episodes to replay (replay-only, no deletions)."
-                : useLatestCountMode
-                ? $"Dry run: found {result.WrongReviewCount} latest episode matches to repair and {result.ReplayCandidateCount} watched episodes to replay."
-                : $"Dry run: found {result.WrongReviewCount} wrong episode reviews after marker and {result.ReplayCandidateCount} watched episodes to replay.";
-            return Ok(result);
-        }
+            if (request.DryRun)
+            {
+                result.Success = true;
+                result.Message = useReplayLatestJellyfinMode
+                    ? $"Dry run: found {result.ReplayCandidateCount} latest Jellyfin watched episodes to replay (replay-only, no deletions)."
+                    : useLatestCountMode
+                    ? $"Dry run: found {result.WrongReviewCount} latest episode matches and planned {result.ReplayCandidateCount} identifier-matched replays."
+                    : $"Dry run: found {result.WrongReviewCount} wrong episode reviews after marker and {result.ReplayCandidateCount} watched episodes to replay.";
+                return Ok(result);
+            }
 
-        if (useLatestCountMode)
-        {
+            if (useLatestCountMode)
+            {
             foreach (var plannedRepair in latestRepairPlan)
             {
                 result.ReplayAttempted++;
@@ -390,9 +394,9 @@ public sealed class PopfeedController : ControllerBase
                         plannedRepair.Episode.Id);
                 }
             }
-        }
-        else
-        {
+            }
+            else
+            {
             foreach (var watchedEpisode in watchedEpisodes)
             {
                 result.ReplayAttempted++;
@@ -423,25 +427,45 @@ public sealed class PopfeedController : ControllerBase
             {
                 foreach (var wrongReview in wrongEpisodeReviews)
                 {
-                    var rkey = GetRecordKey(wrongReview.Record.Uri);
-                    await _atProtoClient.DeleteRecordAsync(
-                        userConfiguration.PdsUrl,
-                        session,
-                        ReviewCollection,
-                        rkey,
-                        cancellationToken).ConfigureAwait(false);
-                    result.DeletedWrongReviews++;
+                    try
+                    {
+                        var rkey = GetRecordKey(wrongReview.Record.Uri);
+                        await _atProtoClient.DeleteRecordAsync(
+                            userConfiguration.PdsUrl,
+                            session,
+                            ReviewCollection,
+                            rkey,
+                            cancellationToken).ConfigureAwait(false);
+                        result.DeletedWrongReviews++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Failed to delete wrong review {ReviewUri} after replay.",
+                            wrongReview.Record.Uri);
+                    }
                 }
             }
-        }
+            }
 
-        result.Success = true;
-        result.Message = useReplayLatestJellyfinMode
-            ? $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} latest Jellyfin watched episodes (replay-only, no deletions)."
-            : useLatestCountMode
-            ? $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} latest wrong matches after successful replay."
-            : $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} wrong episode reviews after successful replay.";
-        return Ok(result);
+            result.Success = true;
+            result.Message = useReplayLatestJellyfinMode
+                ? $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} latest Jellyfin watched episodes (replay-only, no deletions)."
+                : useLatestCountMode
+                ? $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} latest wrong matches after successful replay."
+                : $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} wrong episode reviews after successful replay.";
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "RepairEpisodeActivities failed for user {UserId}.", request.UserId);
+            return Ok(new PopfeedRepairEpisodesResult
+            {
+                Success = false,
+                Message = "Repair failed: " + ex.Message,
+            });
+        }
     }
 
     private static PopfeedRepairEpisodeReplayItem BuildReplayPreview(
@@ -647,18 +671,63 @@ public sealed class PopfeedController : ControllerBase
         Guid jellyfinUserId,
         (AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)[] wrongListItems)
     {
-        var watchedEpisodes = GetLatestWatchedEpisodes(jellyfinUserId, wrongListItems.Length)
-            .OrderBy(entry => entry.PlayedAtUtc)
-            .ToArray();
+        var watchedEpisodes = GetLatestWatchedEpisodes(jellyfinUserId, Math.Max(wrongListItems.Length * 3, wrongListItems.Length))
+            .ToList();
 
-        var pairCount = Math.Min(wrongListItems.Length, watchedEpisodes.Length);
         var plan = new System.Collections.Generic.List<(AtProtoRecord<PopfeedListItemRecord> WrongListItem, Episode Episode, DateTimeOffset PlayedAtUtc)>();
-        for (var index = 0; index < pairCount; index++)
+
+        foreach (var wrongListItem in wrongListItems.OrderBy(entry => entry.CreatedAt))
         {
-            plan.Add((wrongListItems[index].Record, watchedEpisodes[index].Episode, watchedEpisodes[index].PlayedAtUtc));
+            var bestMatch = watchedEpisodes
+                .Where(candidate => EpisodeMatchesListItem(candidate.Episode, wrongListItem.Record.Value))
+                .OrderBy(candidate => Math.Abs((candidate.PlayedAtUtc - wrongListItem.CreatedAt).TotalSeconds))
+                .FirstOrDefault();
+
+            if (bestMatch.Episode is null)
+            {
+                continue;
+            }
+
+            plan.Add((wrongListItem.Record, bestMatch.Episode, bestMatch.PlayedAtUtc));
+            _ = watchedEpisodes.Remove(bestMatch);
         }
 
         return plan.ToArray();
+    }
+
+    private static bool EpisodeMatchesListItem(Episode episode, PopfeedListItemRecord listItem)
+    {
+        var identifiers = listItem.Identifiers;
+        if (identifiers.SeasonNumber.HasValue && episode.ParentIndexNumber != identifiers.SeasonNumber.Value)
+        {
+            return false;
+        }
+
+        if (identifiers.EpisodeNumber.HasValue && episode.IndexNumber != identifiers.EpisodeNumber.Value)
+        {
+            return false;
+        }
+
+        var seriesTmdb = GetProviderId(episode.Series, MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
+        var episodeTmdb = GetProviderId(episode, MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
+        if (!string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId))
+        {
+            return string.Equals(seriesTmdb, identifiers.TmdbTvSeriesId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(episodeTmdb, identifiers.TmdbTvSeriesId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(identifiers.TmdbId) && identifiers.SeasonNumber.HasValue && identifiers.EpisodeNumber.HasValue)
+        {
+            return string.Equals(seriesTmdb, identifiers.TmdbId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(episodeTmdb, identifiers.TmdbId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(identifiers.TmdbId))
+        {
+            return string.Equals(episodeTmdb, identifiers.TmdbId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 
     private (AtProtoRecord<PopfeedReviewRecord> WrongReview, Episode Episode, DateTimeOffset PlayedAtUtc)[] BuildLatestRepairPlan(
