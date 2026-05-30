@@ -61,6 +61,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
         var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
         var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
+        var watchedListType = await ResolveListTypeForUriAsync(userConfiguration, session, watchedListUri, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
         var matchingListItems = await FindMatchingListItemsAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
         var existingListItem = SelectPreferredListItem(matchingListItems, mappedItem);
         var duplicateListItems = existingListItem is null
@@ -82,6 +83,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                     Identifiers = mappedItem.Identifiers,
                     CreativeWorkType = mappedItem.CreativeWorkType,
                     ListUri = watchedListUri,
+                    ListType = watchedListType,
                     Status = desiredStatus,
                     AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
                     CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null,
@@ -94,7 +96,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             else
             {
                 // An existing list item was found; update it only if something meaningful changed.
-                var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played);
+                var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played, watchedListType);
                 var shouldForceCanonicalEpisodeRefresh = !needsUpdate
                     && (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
                         || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
@@ -109,6 +111,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                         Identifiers = mappedItem.Identifiers,
                         CreativeWorkType = mappedItem.CreativeWorkType,
                         ListUri = watchedListUri,
+                        ListType = watchedListType,
                         Status = desiredStatus,
                         AddedAt = string.IsNullOrWhiteSpace(existingListItem.Value.AddedAt)
                             ? ToAtProtoDateTime(timestamp.UtcDateTime)
@@ -138,6 +141,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                     existingListItem.Value.CreativeWorkType = mappedItem.CreativeWorkType;
                     existingListItem.Value.Status = desiredStatus;
                     existingListItem.Value.Title = title;
+                    existingListItem.Value.ListType = watchedListType;
                     existingListItem.Value.CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null;
                     if (string.IsNullOrWhiteSpace(existingListItem.Value.AddedAt))
                     {
@@ -255,12 +259,15 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         PopfeedMappedItem mappedItem,
         string desiredStatus,
         string title,
-        bool played)
+        bool played,
+        string? desiredListType = null)
     {
         return !string.Equals(existing.Status, desiredStatus, StringComparison.Ordinal)
             || !string.Equals(existing.Title, title, StringComparison.Ordinal)
             || !existing.Identifiers.HasSameValues(mappedItem.Identifiers)
             || !string.Equals(existing.CreativeWorkType, mappedItem.CreativeWorkType, StringComparison.Ordinal)
+            || (!string.IsNullOrWhiteSpace(desiredListType)
+                && !string.Equals(existing.ListType, desiredListType, StringComparison.OrdinalIgnoreCase))
             || (played && existing.CompletedAt is null)
             || (!played && existing.CompletedAt is not null);
     }
@@ -294,6 +301,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         CancellationToken cancellationToken)
     {
         var listName = GetWatchedListName(userConfiguration, creativeWorkType);
+        var expectedListType = GetWatchedListType(creativeWorkType);
         var cachedUri = userConfiguration.GetWatchedListUri(creativeWorkType);
         if (!string.IsNullOrWhiteSpace(cachedUri))
         {
@@ -322,6 +330,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         {
             Name = listName,
             Description = "Created by Jellyfin Popfeed plugin to mirror watched history.",
+            ListType = expectedListType,
             CreatedAt = ToAtProtoDateTime(DateTime.UtcNow),
             Ordered = false,
         };
@@ -356,6 +365,52 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             "episode" or "tv_episode" or "tv_season" or "tv_show" => "Watched Shows",
             _ => "Watched",
         };
+    }
+
+    private static string GetWatchedListType(string creativeWorkType)
+    {
+        return creativeWorkType switch
+        {
+            "movie" => "watched_movies",
+            "episode" or "tv_episode" or "tv_season" or "tv_show" => "watched_tv_shows",
+            _ => "watched",
+        };
+    }
+
+    private async Task<string> ResolveListTypeForUriAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string listUri,
+        string creativeWorkType,
+        CancellationToken cancellationToken)
+    {
+        var defaultListType = GetWatchedListType(creativeWorkType);
+        string? cursor = null;
+
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListRecord>(
+                userConfiguration.PdsUrl,
+                session,
+                ListCollection,
+                cursor,
+                cancellationToken).ConfigureAwait(false);
+
+            var match = page.Records.FirstOrDefault(record =>
+                record.Value is not null
+                && string.Equals(record.Uri, listUri, StringComparison.Ordinal));
+            if (match is not null)
+            {
+                return string.IsNullOrWhiteSpace(match.Value.ListType)
+                    ? defaultListType
+                    : match.Value.ListType;
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        return defaultListType;
     }
 
     /// <summary>
