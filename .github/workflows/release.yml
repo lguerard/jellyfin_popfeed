@@ -214,4 +214,27 @@ jobs:
                       git pull --rebase origin $manifestBranch
                       git push origin HEAD:$manifestBranch
                   }
+
+                  # Fetch the remote branch again and verify the expected versions are present.
+                  # This makes manifest publication failures explicit in CI instead of silent.
+                  git fetch --depth 1 origin $manifestBranch
+                  $verifyPath = Join-Path $tempDir 'manifest.remote.json'
+                  git show "origin/$manifestBranch`:manifest.json" | Set-Content -Path $verifyPath -Encoding UTF8
+
+                  $remoteEntries = Read-ManifestEntries -Path $verifyPath
+                  foreach ($incomingEntry in $incomingEntries) {
+                      $remoteEntry = $remoteEntries | Where-Object { $_.guid -eq $incomingEntry.guid } | Select-Object -First 1
+                      if ($null -eq $remoteEntry) {
+                          throw "Stable manifest verification failed: guid '$($incomingEntry.guid)' missing on remote branch '$manifestBranch'."
+                      }
+
+                      $remoteVersions = @($remoteEntry.versions | ForEach-Object { $_.version })
+                      foreach ($incomingVersion in @($incomingEntry.versions | ForEach-Object { $_.version })) {
+                          if ($remoteVersions -notcontains $incomingVersion) {
+                              throw "Stable manifest verification failed: version '$incomingVersion' missing for guid '$($incomingEntry.guid)' on remote branch '$manifestBranch'."
+                          }
+                      }
+                  }
+
+                  Write-Host "Stable manifest verification passed for $env:RELEASE_TAG on branch '$manifestBranch'."
                   Pop-Location
