@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.11.0",
+        "changelog": "- fix(plugin): 🐛 parse versioned plugin dirs with suffixes",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.11/Jellyfin.Plugin.Popfeed-v0.4.11.zip",
+        "checksum": "cfa4c8f2a0fcf36906f8c35e81c2c79b",
+        "timestamp": "2026-05-30T11:30:57.8039924Z"
+      },
+      {
         "version": "0.4.10.0",
         "changelog": "- fix(repair): 🐛 prevent internal errors and match by identifiers",
         "targetAbi": "10.11.0.0",
