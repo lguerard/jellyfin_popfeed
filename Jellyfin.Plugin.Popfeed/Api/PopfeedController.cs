@@ -429,13 +429,21 @@ public sealed class PopfeedController : ControllerBase
         {
             try
             {
-                await _syncService.SyncPlaystateAsync(
+                var replayResult = await _syncService.ReplaySyncAsync(
                     jellyfinUserId,
                     episode,
                     true,
-                    false,
                     playedAtUtc,
                     cancellationToken).ConfigureAwait(false);
+
+                if (!replayResult.Success || !replayResult.Executed || !replayResult.CreatedPopfeedActivity)
+                {
+                    throw new InvalidOperationException(
+                        $"Replay did not produce a successful remote sync for '{episode.Name}' ({episode.Id}). "
+                        + $"Result: success={replayResult.Success}, executed={replayResult.Executed}, "
+                        + $"createdActivity={replayResult.CreatedPopfeedActivity}, message='{replayResult.Message}'.");
+                }
+
                 return;
             }
             catch (Exception ex) when (IsRateLimitError(ex) && attempt < maxAttempts)

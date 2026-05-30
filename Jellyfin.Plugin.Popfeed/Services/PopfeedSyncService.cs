@@ -73,6 +73,34 @@ public sealed class PopfeedSyncService
     }
 
     /// <summary>
+    /// Executes a real sync operation for repair workflows and returns the
+    /// full result so callers can validate whether replay actually succeeded.
+    /// </summary>
+    /// <param name="jellyfinUserId">The Jellyfin user id.</param>
+    /// <param name="item">The episode item to replay.</param>
+    /// <param name="played">Whether the item is marked watched.</param>
+    /// <param name="playedAt">The watched timestamp.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The replay result.</returns>
+    public Task<PopfeedSyncTestResult> ReplaySyncAsync(
+        Guid jellyfinUserId,
+        BaseItem item,
+        bool played,
+        DateTimeOffset? playedAt,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteSyncCoreAsync(
+            jellyfinUserId,
+            item,
+            played,
+            false,
+            playedAt,
+            true,
+            "repair",
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Gets recent sync activity for the settings page.
     /// </summary>
     /// <param name="jellyfinUserId">Optional user filter.</param>
