@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.12.0",
+        "changelog": "- fix(atproto): 🐛 honor 429 cooldown hints",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.12/Jellyfin.Plugin.Popfeed-v0.4.12.zip",
+        "checksum": "5ef89f1096995d9dfd5797b7988c9ffb",
+        "timestamp": "2026-05-30T12:20:45.5200835Z"
+      },
+      {
         "version": "0.4.11.0",
         "changelog": "- fix(plugin): 🐛 parse versioned plugin dirs with suffixes",
         "targetAbi": "10.11.0.0",
