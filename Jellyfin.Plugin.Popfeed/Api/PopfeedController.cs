@@ -28,6 +28,8 @@ namespace Jellyfin.Plugin.Popfeed.Api;
 [Produces(MediaTypeNames.Application.Json)]
 public sealed class PopfeedController : ControllerBase
 {
+    private const string ReviewCollection = "social.popfeed.feed.review";
+    private const string ListItemCollection = "social.popfeed.feed.listItem";
     private readonly ILibraryManager _libraryManager;
     private readonly IUserDataManager _userDataManager;
     private readonly IUserManager _userManager;
@@ -234,16 +236,19 @@ public sealed class PopfeedController : ControllerBase
         var allReviews = await LoadAllReviewRecordsAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
 
         (AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)[] wrongEpisodeReviews;
+        (AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)[] wrongEpisodeListItems;
         (Episode Episode, DateTimeOffset PlayedAtUtc)[] watchedEpisodes;
 
         if (useLatestCountMode)
         {
-            wrongEpisodeReviews = allReviews
-                .Where(record => record.Value is not null && IsEpisodeReview(record.Value))
+            wrongEpisodeReviews = Array.Empty<(AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)>();
+            var allListItems = await LoadAllListItemRecordsAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
+            wrongEpisodeListItems = allListItems
+                .Where(record => record.Value is not null && IsEpisodeListItem(record.Value))
                 .Select(record => new
                 {
                     Record = record,
-                    CreatedAt = ParseRecordTimestamp(record.Value.CreatedAt),
+                    CreatedAt = ParseListItemTimestamp(record.Value),
                 })
                 .Where(entry => entry.CreatedAt.HasValue)
                 .OrderByDescending(entry => entry.CreatedAt)
@@ -256,6 +261,7 @@ public sealed class PopfeedController : ControllerBase
         }
         else
         {
+            wrongEpisodeListItems = Array.Empty<(AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)>();
             var marker = allReviews
                 .Where(record => record.Value is not null && !string.IsNullOrWhiteSpace(record.Value.Title))
                 .Select(record => new
@@ -300,11 +306,13 @@ public sealed class PopfeedController : ControllerBase
                 .ToArray();
         }
 
-        result.WrongReviewCount = wrongEpisodeReviews.Length;
+        result.WrongReviewCount = useLatestCountMode
+            ? wrongEpisodeListItems.Length
+            : wrongEpisodeReviews.Length;
 
         var latestRepairPlan = useLatestCountMode
-            ? BuildLatestRepairPlan(request.UserId, wrongEpisodeReviews)
-            : Array.Empty<(AtProtoRecord<PopfeedReviewRecord> WrongReview, Episode Episode, DateTimeOffset PlayedAtUtc)>();
+            ? BuildLatestRepairPlanFromListItems(request.UserId, wrongEpisodeListItems)
+            : Array.Empty<(AtProtoRecord<PopfeedListItemRecord> WrongListItem, Episode Episode, DateTimeOffset PlayedAtUtc)>();
 
         result.ReplayCandidateCount = useLatestCountMode
             ? latestRepairPlan.Length
@@ -333,11 +341,11 @@ public sealed class PopfeedController : ControllerBase
                         cancellationToken).ConfigureAwait(false);
                     result.ReplaySucceeded++;
 
-                    var wrongRkey = GetRecordKey(plannedRepair.WrongReview.Uri);
+                    var wrongRkey = GetRecordKey(plannedRepair.WrongListItem.Uri);
                     await _atProtoClient.DeleteRecordAsync(
                         userConfiguration.PdsUrl,
                         session,
-                        "social.popfeed.feed.review",
+                        ListItemCollection,
                         wrongRkey,
                         cancellationToken).ConfigureAwait(false);
                     result.DeletedWrongReviews++;
@@ -349,8 +357,8 @@ public sealed class PopfeedController : ControllerBase
                 {
                     _logger.LogWarning(
                         ex,
-                        "Failed to repair review {ReviewUri} using episode {ItemName} ({ItemId}).",
-                        plannedRepair.WrongReview.Uri,
+                        "Failed to repair list item {ListItemUri} using episode {ItemName} ({ItemId}).",
+                        plannedRepair.WrongListItem.Uri,
                         plannedRepair.Episode.Name,
                         plannedRepair.Episode.Id);
                 }
@@ -392,7 +400,7 @@ public sealed class PopfeedController : ControllerBase
                     await _atProtoClient.DeleteRecordAsync(
                         userConfiguration.PdsUrl,
                         session,
-                        "social.popfeed.feed.review",
+                        ReviewCollection,
                         rkey,
                         cancellationToken).ConfigureAwait(false);
                     result.DeletedWrongReviews++;
@@ -466,7 +474,32 @@ public sealed class PopfeedController : ControllerBase
             var page = await _atProtoClient.ListRecordsAsync<PopfeedReviewRecord>(
                 userConfiguration.PdsUrl,
                 session,
-                "social.popfeed.feed.review",
+                ReviewCollection,
+                cursor,
+                cancellationToken).ConfigureAwait(false);
+
+            records.AddRange(page.Records.Where(record => record.Value is not null));
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        return records;
+    }
+
+    private async Task<System.Collections.Generic.List<AtProtoRecord<PopfeedListItemRecord>>> LoadAllListItemRecordsAsync(
+        Configuration.PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        CancellationToken cancellationToken)
+    {
+        var records = new System.Collections.Generic.List<AtProtoRecord<PopfeedListItemRecord>>();
+        string? cursor = null;
+
+        do
+        {
+            var page = await _atProtoClient.ListRecordsAsync<PopfeedListItemRecord>(
+                userConfiguration.PdsUrl,
+                session,
+                ListItemCollection,
                 cursor,
                 cancellationToken).ConfigureAwait(false);
 
@@ -551,6 +584,24 @@ public sealed class PopfeedController : ControllerBase
             })
             .OrderByDescending(entry => entry.PlayedAtUtc)
             .Take(latestCount);
+    }
+
+    private (AtProtoRecord<PopfeedListItemRecord> WrongListItem, Episode Episode, DateTimeOffset PlayedAtUtc)[] BuildLatestRepairPlanFromListItems(
+        Guid jellyfinUserId,
+        (AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)[] wrongListItems)
+    {
+        var watchedEpisodes = GetLatestWatchedEpisodes(jellyfinUserId, wrongListItems.Length)
+            .OrderBy(entry => entry.PlayedAtUtc)
+            .ToArray();
+
+        var pairCount = Math.Min(wrongListItems.Length, watchedEpisodes.Length);
+        var plan = new System.Collections.Generic.List<(AtProtoRecord<PopfeedListItemRecord> WrongListItem, Episode Episode, DateTimeOffset PlayedAtUtc)>();
+        for (var index = 0; index < pairCount; index++)
+        {
+            plan.Add((wrongListItems[index].Record, watchedEpisodes[index].Episode, watchedEpisodes[index].PlayedAtUtc));
+        }
+
+        return plan.ToArray();
     }
 
     private (AtProtoRecord<PopfeedReviewRecord> WrongReview, Episode Episode, DateTimeOffset PlayedAtUtc)[] BuildLatestRepairPlan(
@@ -662,6 +713,12 @@ public sealed class PopfeedController : ControllerBase
             || string.Equals(record.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsEpisodeListItem(PopfeedListItemRecord record)
+    {
+        return string.Equals(record.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(record.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static DateTimeOffset? ParseRecordTimestamp(string? createdAt)
     {
         if (string.IsNullOrWhiteSpace(createdAt))
@@ -672,6 +729,14 @@ public sealed class PopfeedController : ControllerBase
         return DateTimeOffset.TryParse(createdAt, out var parsed)
             ? parsed.ToUniversalTime()
             : null;
+    }
+
+    private static DateTimeOffset? ParseListItemTimestamp(PopfeedListItemRecord record)
+    {
+        var rawTimestamp = !string.IsNullOrWhiteSpace(record.CompletedAt)
+            ? record.CompletedAt
+            : record.AddedAt;
+        return ParseRecordTimestamp(rawTimestamp);
     }
 
     private static string GetRecordKey(string uri)
