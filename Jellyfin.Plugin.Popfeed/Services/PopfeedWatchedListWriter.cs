@@ -96,7 +96,8 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 // An existing list item was found; update it only if something meaningful changed.
                 var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played);
                 var shouldForceCanonicalEpisodeRefresh = !needsUpdate
-                    && string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                    && (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
                     && !string.IsNullOrWhiteSpace(existingListItem.Value.Identifiers.TmdbTvSeriesId)
                     && existingListItem.Value.Identifiers.SeasonNumber.HasValue
                     && existingListItem.Value.Identifiers.EpisodeNumber.HasValue;
@@ -417,7 +418,8 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 
         var canonicalEpisode = matches.FirstOrDefault(candidate =>
             candidate.Value is not null
-            && string.Equals(candidate.Value.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+            && (string.Equals(candidate.Value.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(candidate.Value.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
             && !string.IsNullOrWhiteSpace(candidate.Value.Identifiers.TmdbTvSeriesId)
             && candidate.Value.Identifiers.SeasonNumber.HasValue
             && candidate.Value.Identifiers.EpisodeNumber.HasValue);

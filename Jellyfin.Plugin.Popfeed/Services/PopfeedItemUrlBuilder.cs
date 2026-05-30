@@ -38,7 +38,7 @@ internal static class PopfeedItemUrlBuilder
                 && episodeNumber.HasValue)
             {
                 return new PopfeedMappedItem(
-                    "episode",
+                    "tv_episode",
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
@@ -55,7 +55,7 @@ internal static class PopfeedItemUrlBuilder
             if (!string.IsNullOrWhiteSpace(identifiers.TmdbId))
             {
                 return new PopfeedMappedItem(
-                    "episode",
+                    "tv_episode",
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,

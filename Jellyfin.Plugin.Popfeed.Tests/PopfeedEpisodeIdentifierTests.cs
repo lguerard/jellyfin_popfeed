@@ -327,7 +327,7 @@ public sealed class PopfeedEpisodeIdentifierTests
                     EpisodeNumber = 1,
                 }));
 
-        Assert.Equal("episode", normalized.CreativeWorkType);
+        Assert.Equal("tv_episode", normalized.CreativeWorkType);
         Assert.Equal("67997", normalized.Identifiers.TmdbTvSeriesId);
         Assert.Null(normalized.Identifiers.TmdbId);
         Assert.Equal(1, normalized.Identifiers.SeasonNumber);
@@ -378,7 +378,7 @@ public sealed class PopfeedEpisodeIdentifierTests
                     EpisodeNumber = 8,
                 }));
 
-        Assert.Equal("episode", normalized.CreativeWorkType);
+        Assert.Equal("tv_episode", normalized.CreativeWorkType);
         Assert.Equal("4556", normalized.Identifiers.TmdbId);
         Assert.Null(normalized.Identifiers.TmdbTvSeriesId);
         Assert.Null(normalized.Identifiers.SeasonNumber);
@@ -403,7 +403,7 @@ public sealed class PopfeedEpisodeIdentifierTests
         var normalized = PopfeedItemUrlBuilder.NormalizeMappedItem(mapped);
         var itemUrl = PopfeedItemUrlBuilder.BuildItemUrl(mapped);
 
-        Assert.Equal("episode", normalized.CreativeWorkType);
+        Assert.Equal("tv_episode", normalized.CreativeWorkType);
         Assert.Equal("4556", normalized.Identifiers.TmdbId);
         Assert.Null(normalized.Identifiers.TmdbTvSeriesId);
         Assert.Null(normalized.Identifiers.SeasonNumber);
