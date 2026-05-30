@@ -372,14 +372,24 @@ public sealed class PopfeedController : ControllerBase
                         cancellationToken).ConfigureAwait(false);
                     result.ReplaySucceeded++;
 
-                    var wrongRkey = GetRecordKey(plannedRepair.WrongListItem.Uri);
-                    await _atProtoClient.DeleteRecordAsync(
-                        userConfiguration.PdsUrl,
+                    var shouldDeleteWrongListItem = await ShouldDeleteOriginalListItemAsync(
+                        userConfiguration,
                         session,
-                        ListItemCollection,
-                        wrongRkey,
+                        plannedRepair.WrongListItem,
+                        plannedRepair.Episode,
                         cancellationToken).ConfigureAwait(false);
-                    result.DeletedWrongReviews++;
+
+                    if (shouldDeleteWrongListItem)
+                    {
+                        var wrongRkey = GetRecordKey(plannedRepair.WrongListItem.Uri);
+                        await _atProtoClient.DeleteRecordAsync(
+                            userConfiguration.PdsUrl,
+                            session,
+                            ListItemCollection,
+                            wrongRkey,
+                            cancellationToken).ConfigureAwait(false);
+                        result.DeletedWrongReviews++;
+                    }
 
                     // Pace requests to reduce ATProto rate-limit pressure.
                     await Task.Delay(1200, cancellationToken).ConfigureAwait(false);
@@ -540,6 +550,75 @@ public sealed class PopfeedController : ControllerBase
         }
 
         throw lastException ?? new InvalidOperationException("Episode replay failed without an error.");
+    }
+
+    private async Task<bool> ShouldDeleteOriginalListItemAsync(
+        Configuration.PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        AtProtoRecord<PopfeedListItemRecord> originalListItem,
+        Episode episode,
+        CancellationToken cancellationToken)
+    {
+        var currentItemAtUri = await FindListItemByUriAsync(
+            userConfiguration,
+            session,
+            originalListItem.Uri,
+            cancellationToken).ConfigureAwait(false);
+
+        if (currentItemAtUri?.Value is null)
+        {
+            // The original URI no longer exists, so there is nothing left to delete.
+            return false;
+        }
+
+        var mappedEpisode = MapEpisodeForPopfeed(episode);
+        if (mappedEpisode is null)
+        {
+            return true;
+        }
+
+        if (currentItemAtUri.Value.Identifiers.HasSameValues(mappedEpisode.Identifiers))
+        {
+            _logger.LogInformation(
+                "Skipping delete for repaired list item {ListItemUri}: replay corrected this record in-place.",
+                originalListItem.Uri);
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task<AtProtoRecord<PopfeedListItemRecord>?> FindListItemByUriAsync(
+        Configuration.PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string listItemUri,
+        CancellationToken cancellationToken)
+    {
+        string? cursor = null;
+
+        do
+        {
+            var page = await _atProtoClient.ListRecordsAsync<PopfeedListItemRecord>(
+                userConfiguration.PdsUrl,
+                session,
+                ListItemCollection,
+                cursor,
+                cancellationToken).ConfigureAwait(false);
+
+            var match = page.Records.FirstOrDefault(record =>
+                record.Value is not null
+                && string.Equals(record.Uri, listItemUri, StringComparison.Ordinal));
+
+            if (match is not null)
+            {
+                return match;
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        return null;
     }
 
     private async Task<System.Collections.Generic.List<AtProtoRecord<PopfeedReviewRecord>>> LoadAllReviewRecordsAsync(
