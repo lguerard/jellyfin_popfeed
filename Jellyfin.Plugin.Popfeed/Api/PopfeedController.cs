@@ -404,7 +404,7 @@ public sealed class PopfeedController : ControllerBase
             .Select(episode => new
             {
                 Episode = episode,
-                UserData = _userDataManager.GetUserData(jellyfinUserId, episode),
+                UserData = _userDataManager.GetUserData(user, episode),
             })
             .Where(entry => entry.UserData is not null
                 && entry.UserData.Played
@@ -441,7 +441,7 @@ public sealed class PopfeedController : ControllerBase
             .Select(episode => new
             {
                 Episode = episode,
-                UserData = _userDataManager.GetUserData(jellyfinUserId, episode),
+                UserData = _userDataManager.GetUserData(user, episode),
             })
             .Where(entry => entry.UserData is not null
                 && entry.UserData.Played
