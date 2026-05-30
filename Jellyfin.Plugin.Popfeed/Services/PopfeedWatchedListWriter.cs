@@ -101,7 +101,37 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                     && existingListItem.Value.Identifiers.SeasonNumber.HasValue
                     && existingListItem.Value.Identifiers.EpisodeNumber.HasValue;
 
-                if (needsUpdate || shouldForceCanonicalEpisodeRefresh)
+                if (shouldForceCanonicalEpisodeRefresh)
+                {
+                    var refreshedRecord = new PopfeedListItemRecord
+                    {
+                        Identifiers = mappedItem.Identifiers,
+                        CreativeWorkType = mappedItem.CreativeWorkType,
+                        ListUri = watchedListUri,
+                        Status = desiredStatus,
+                        AddedAt = string.IsNullOrWhiteSpace(existingListItem.Value.AddedAt)
+                            ? ToAtProtoDateTime(timestamp.UtcDateTime)
+                            : existingListItem.Value.AddedAt,
+                        CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null,
+                        Title = title,
+                    };
+
+                    var existingRkey = GetRecordKey(existingListItem.Uri);
+                    await _client.DeleteRecordAsync(
+                        userConfiguration.PdsUrl,
+                        session,
+                        ListItemCollection,
+                        existingRkey,
+                        cancellationToken).ConfigureAwait(false);
+                    await _client.CreateRecordAsync(
+                        userConfiguration.PdsUrl,
+                        session,
+                        ListItemCollection,
+                        refreshedRecord,
+                        cancellationToken).ConfigureAwait(false);
+                    _logger.LogInformation("Replaced canonical watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
+                }
+                else if (needsUpdate)
                 {
                     existingListItem.Value.Identifiers = mappedItem.Identifiers;
                     existingListItem.Value.CreativeWorkType = mappedItem.CreativeWorkType;
@@ -120,14 +150,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                         GetRecordKey(existingListItem.Uri),
                         existingListItem.Value,
                         cancellationToken).ConfigureAwait(false);
-                    if (needsUpdate)
-                    {
-                        _logger.LogInformation("Updated watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Refreshed canonical watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
-                    }
+                    _logger.LogInformation("Updated watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
                 }
                 else
                 {
