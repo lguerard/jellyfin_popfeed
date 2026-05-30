@@ -26,6 +26,8 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
     private readonly PopfeedAtProtoClient _client;
     private readonly ILogger<PopfeedWatchedListWriter> _logger;
 
+    private readonly record struct EpisodeCoordinate(int SeasonNumber, int EpisodeNumber);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="PopfeedWatchedListWriter"/> class.
     /// </summary>
@@ -58,9 +60,28 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         // (TmdbTvSeriesId + SeasonNumber + EpisodeNumber) before any remote I/O.
         mappedItem = PopfeedItemUrlBuilder.NormalizeMappedItem(mappedItem, item);
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
+        var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbId))
+        {
+            var resolvedEpisodeTmdbId = await ResolveEpisodeTmdbIdFromTvShowProgressAsync(
+                userConfiguration,
+                session,
+                watchedListUri,
+                mappedItem.Identifiers,
+                cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(resolvedEpisodeTmdbId))
+            {
+                mappedItem.Identifiers.TmdbId = resolvedEpisodeTmdbId;
+                _logger.LogInformation(
+                    "Resolved missing episode tmdbId from tv_show watchedEpisodes for {ItemName} on account {Identifier}.",
+                    title,
+                    userConfiguration.Identifier);
+            }
+        }
+
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
         var existingRecord = await FindExistingActivityAsync(userConfiguration, session, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
-        var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
         var watchedListType = await ResolveListTypeForUriAsync(userConfiguration, session, watchedListUri, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
         var matchingListItems = await FindMatchingListItemsAsync(userConfiguration, session, watchedListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
         var existingListItem = SelectPreferredListItem(matchingListItems, mappedItem);
@@ -305,6 +326,26 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             seriesTmdbId,
             cancellationToken).ConfigureAwait(false);
 
+        var libraryEpisodes = GetLibraryEpisodeCoordinates(episode);
+        var watchedEpisodes = tvShowProgressItem?.Value.WatchedEpisodes is null
+            ? new List<PopfeedWatchedEpisodeRecord>()
+            : new List<PopfeedWatchedEpisodeRecord>(tvShowProgressItem.Value.WatchedEpisodes);
+
+        watchedEpisodes = MergeWatchedEpisodes(watchedEpisodes.ToArray(), seriesEpisodes.ToArray(), [watchedEpisode]);
+        var completedSeasons = GetCompletedSeasons(libraryEpisodes, watchedEpisodes);
+        var isSeriesComplete = IsSeriesComplete(libraryEpisodes, watchedEpisodes);
+
+        await ReconcileSeasonListItemsAsync(
+            userConfiguration,
+            session,
+            watchedListUri,
+            watchedListType,
+            seriesTmdbId,
+            episode.Series?.Name,
+            completedSeasons,
+            timestamp,
+            cancellationToken).ConfigureAwait(false);
+
         if (tvShowProgressItem is null)
         {
             var newProgressRecord = new PopfeedListItemRecord
@@ -316,9 +357,15 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 CreativeWorkType = "tv_show",
                 ListUri = watchedListUri,
                 ListType = watchedListType,
+                Status = isSeriesComplete
+                    ? PopfeedListItemRecord.FinishedStatus
+                    : PopfeedListItemRecord.InProgressStatus,
                 AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                CompletedAt = isSeriesComplete
+                    ? ToAtProtoDateTime(timestamp.UtcDateTime)
+                    : null,
                 Title = episode.Series?.Name,
-                WatchedEpisodes = MergeWatchedEpisodes(seriesEpisodes.ToArray(), [watchedEpisode]),
+                WatchedEpisodes = watchedEpisodes,
             };
 
             await _client.CreateRecordAsync(
@@ -335,11 +382,6 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         }
 
         var existing = tvShowProgressItem.Value;
-        var watchedEpisodes = existing.WatchedEpisodes is null
-            ? new List<PopfeedWatchedEpisodeRecord>()
-            : new List<PopfeedWatchedEpisodeRecord>(existing.WatchedEpisodes);
-
-        watchedEpisodes = MergeWatchedEpisodes(watchedEpisodes.ToArray(), seriesEpisodes.ToArray(), [watchedEpisode]);
 
         var existingEpisode = watchedEpisodes.FirstOrDefault(entry =>
             entry.SeasonNumber == watchedEpisode.SeasonNumber
@@ -367,6 +409,12 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 
         existing.ListUri = watchedListUri;
         existing.ListType = watchedListType;
+        existing.Status = isSeriesComplete
+            ? PopfeedListItemRecord.FinishedStatus
+            : PopfeedListItemRecord.InProgressStatus;
+        existing.CompletedAt = isSeriesComplete
+            ? ToAtProtoDateTime(timestamp.UtcDateTime)
+            : null;
         existing.WatchedEpisodes = watchedEpisodes;
         if (string.IsNullOrWhiteSpace(existing.AddedAt))
         {
@@ -384,6 +432,220 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             "Updated tv_show watchedEpisodes progress for {SeriesName} on account {Identifier}.",
             episode.Series?.Name ?? seriesTmdbId,
             userConfiguration.Identifier);
+    }
+
+    private static HashSet<EpisodeCoordinate> GetLibraryEpisodeCoordinates(Episode episode)
+    {
+        var coordinates = new HashSet<EpisodeCoordinate>();
+        if (episode.Series is null)
+        {
+            if (TryGetEpisodeCoordinate(episode, out var currentCoordinate))
+            {
+                coordinates.Add(currentCoordinate);
+            }
+
+            return coordinates;
+        }
+
+        foreach (var child in episode.Series.GetRecursiveChildren())
+        {
+            if (child is Episode seriesEpisode
+                && TryGetEpisodeCoordinate(seriesEpisode, out var coordinate))
+            {
+                coordinates.Add(coordinate);
+            }
+        }
+
+        if (coordinates.Count == 0 && TryGetEpisodeCoordinate(episode, out var fallbackCoordinate))
+        {
+            coordinates.Add(fallbackCoordinate);
+        }
+
+        return coordinates;
+    }
+
+    private static bool TryGetEpisodeCoordinate(Episode episode, out EpisodeCoordinate coordinate)
+    {
+        if (!episode.ParentIndexNumber.HasValue || !episode.IndexNumber.HasValue)
+        {
+            coordinate = default;
+            return false;
+        }
+
+        coordinate = new EpisodeCoordinate(episode.ParentIndexNumber.Value, episode.IndexNumber.Value);
+        return true;
+    }
+
+    private static HashSet<int> GetCompletedSeasons(
+        HashSet<EpisodeCoordinate> libraryEpisodes,
+        List<PopfeedWatchedEpisodeRecord> watchedEpisodes)
+    {
+        var watchedCoordinates = watchedEpisodes
+            .Select(entry => new EpisodeCoordinate(entry.SeasonNumber, entry.EpisodeNumber))
+            .ToHashSet();
+
+        var completed = new HashSet<int>();
+        foreach (var seasonGroup in libraryEpisodes.GroupBy(entry => entry.SeasonNumber))
+        {
+            if (seasonGroup.All(watchedCoordinates.Contains))
+            {
+                completed.Add(seasonGroup.Key);
+            }
+        }
+
+        return completed;
+    }
+
+    private static bool IsSeriesComplete(
+        HashSet<EpisodeCoordinate> libraryEpisodes,
+        List<PopfeedWatchedEpisodeRecord> watchedEpisodes)
+    {
+        if (libraryEpisodes.Count == 0)
+        {
+            return false;
+        }
+
+        var watchedCoordinates = watchedEpisodes
+            .Select(entry => new EpisodeCoordinate(entry.SeasonNumber, entry.EpisodeNumber))
+            .ToHashSet();
+
+        return libraryEpisodes.All(watchedCoordinates.Contains);
+    }
+
+    private async Task ReconcileSeasonListItemsAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string watchedListUri,
+        string? watchedListType,
+        string seriesTmdbId,
+        string? seriesTitle,
+        HashSet<int> completedSeasons,
+        DateTimeOffset timestamp,
+        CancellationToken cancellationToken)
+    {
+        var existingSeasonItems = await FindTvSeasonItemsAsync(
+            userConfiguration,
+            session,
+            watchedListUri,
+            seriesTmdbId,
+            cancellationToken).ConfigureAwait(false);
+
+        foreach (var existingSeason in existingSeasonItems)
+        {
+            var seasonNumber = existingSeason.Value.Identifiers.SeasonNumber;
+            if (!seasonNumber.HasValue)
+            {
+                continue;
+            }
+
+            if (!completedSeasons.Contains(seasonNumber.Value))
+            {
+                await _client.DeleteRecordAsync(
+                    userConfiguration.PdsUrl,
+                    session,
+                    ListItemCollection,
+                    GetRecordKey(existingSeason.Uri),
+                    cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "Removed completed tv_season marker S{SeasonNumber:00} for series {SeriesId} on account {Identifier}.",
+                    seasonNumber.Value,
+                    seriesTmdbId,
+                    userConfiguration.Identifier);
+            }
+        }
+
+        foreach (var seasonNumber in completedSeasons)
+        {
+            var existingSeason = existingSeasonItems.FirstOrDefault(entry =>
+                entry.Value.Identifiers.SeasonNumber == seasonNumber);
+            if (existingSeason is not null)
+            {
+                if (!string.Equals(existingSeason.Value.ListType, watchedListType, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(existingSeason.Value.Status, PopfeedListItemRecord.FinishedStatus, StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(existingSeason.Value.CompletedAt))
+                {
+                    existingSeason.Value.ListType = watchedListType;
+                    existingSeason.Value.Status = PopfeedListItemRecord.FinishedStatus;
+                    existingSeason.Value.CompletedAt = ToAtProtoDateTime(timestamp.UtcDateTime);
+                    if (string.IsNullOrWhiteSpace(existingSeason.Value.AddedAt))
+                    {
+                        existingSeason.Value.AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime);
+                    }
+
+                    await _client.PutRecordAsync(
+                        userConfiguration.PdsUrl,
+                        session,
+                        ListItemCollection,
+                        GetRecordKey(existingSeason.Uri),
+                        existingSeason.Value,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            var seasonRecord = new PopfeedListItemRecord
+            {
+                Identifiers = new PopfeedIdentifiers
+                {
+                    TmdbTvSeriesId = seriesTmdbId,
+                    SeasonNumber = seasonNumber,
+                },
+                CreativeWorkType = "tv_season",
+                ListUri = watchedListUri,
+                ListType = watchedListType,
+                Status = PopfeedListItemRecord.FinishedStatus,
+                AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                CompletedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                Title = string.IsNullOrWhiteSpace(seriesTitle)
+                    ? $"Season {seasonNumber:00}"
+                    : $"{seriesTitle} - Season {seasonNumber:00}",
+            };
+
+            await _client.CreateRecordAsync(
+                userConfiguration.PdsUrl,
+                session,
+                ListItemCollection,
+                seasonRecord,
+                cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Created completed tv_season marker S{SeasonNumber:00} for series {SeriesId} on account {Identifier}.",
+                seasonNumber,
+                seriesTmdbId,
+                userConfiguration.Identifier);
+        }
+    }
+
+    private async Task<List<AtProtoRecord<PopfeedListItemRecord>>> FindTvSeasonItemsAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string watchedListUri,
+        string seriesTmdbId,
+        CancellationToken cancellationToken)
+    {
+        var matches = new List<AtProtoRecord<PopfeedListItemRecord>>();
+        string? cursor = null;
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(
+                userConfiguration.PdsUrl,
+                session,
+                ListItemCollection,
+                cursor,
+                cancellationToken).ConfigureAwait(false);
+
+            matches.AddRange(page.Records.Where(record =>
+                record.Value is not null
+                && string.Equals(record.Value.ListUri, watchedListUri, StringComparison.Ordinal)
+                && string.Equals(record.Value.CreativeWorkType, "tv_season", StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(record.Value.Identifiers.TmdbTvSeriesId, seriesTmdbId, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(record.Value.Identifiers.TmdbId, seriesTmdbId, StringComparison.OrdinalIgnoreCase))));
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        return matches;
     }
 
     private async Task<AtProtoRecord<PopfeedListItemRecord>?> FindTvShowProgressItemAsync(
@@ -474,6 +736,32 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         while (!string.IsNullOrWhiteSpace(cursor));
 
         return entries;
+    }
+
+    private async Task<string?> ResolveEpisodeTmdbIdFromTvShowProgressAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string watchedListUri,
+        PopfeedIdentifiers identifiers,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            || !identifiers.SeasonNumber.HasValue
+            || !identifiers.EpisodeNumber.HasValue)
+        {
+            return null;
+        }
+
+        var progressItem = await FindTvShowProgressItemAsync(
+            userConfiguration,
+            session,
+            watchedListUri,
+            identifiers.TmdbTvSeriesId,
+            cancellationToken).ConfigureAwait(false);
+
+        return progressItem?.Value.WatchedEpisodes?.FirstOrDefault(entry =>
+            entry.SeasonNumber == identifiers.SeasonNumber.Value
+            && entry.EpisodeNumber == identifiers.EpisodeNumber.Value)?.TmdbId;
     }
 
     private static List<PopfeedWatchedEpisodeRecord> MergeWatchedEpisodes(params PopfeedWatchedEpisodeRecord[][] episodeSets)
