@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.26.0",
+        "changelog": "- fix(recent): 🐛 keep tv_episode in review routing",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.26/Jellyfin.Plugin.Popfeed-v0.4.26.zip",
+        "checksum": "3e4f6cc8e85f2de9cb5f531370eea02f",
+        "timestamp": "2026-05-30T16:06:42.3303988Z"
+      },
+      {
         "version": "0.4.25.0",
         "changelog": "- fix(watched): 🐛 backfill series episode progress",
         "targetAbi": "10.11.0.0",
