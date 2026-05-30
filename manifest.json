@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.27.0",
+        "changelog": "- feat(sync): ✨ reconcile full season and series watched state",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.27/Jellyfin.Plugin.Popfeed-v0.4.27.zip",
+        "checksum": "afab55cb408f9e32c67e4c272741719e",
+        "timestamp": "2026-05-30T16:14:48.2020575Z"
+      },
+      {
         "version": "0.4.26.0",
         "changelog": "- fix(recent): 🐛 keep tv_episode in review routing",
         "targetAbi": "10.11.0.0",
