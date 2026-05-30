@@ -884,9 +884,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 
     private static string GetReviewCreativeWorkType(string creativeWorkType)
     {
-        return string.Equals(creativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase)
-            ? "episode"
-            : creativeWorkType;
+        return creativeWorkType;
     }
 
     /// <summary>
