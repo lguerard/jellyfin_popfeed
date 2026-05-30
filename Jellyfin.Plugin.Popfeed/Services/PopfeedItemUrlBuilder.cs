@@ -108,6 +108,11 @@ internal static class PopfeedItemUrlBuilder
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue
                 => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
+            "episode" or "tv_episode" when string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+                && !string.IsNullOrWhiteSpace(identifiers.TmdbId)
+                && identifiers.SeasonNumber.HasValue
+                && identifiers.EpisodeNumber.HasValue
+                => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
             "episode" or "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
                 => $"https://popfeed.social/episode/{Uri.EscapeDataString(identifiers.TmdbId)}",
             "tv_season" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)

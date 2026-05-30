@@ -10,6 +10,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Querying;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -251,9 +252,7 @@ public sealed class PopfeedController : ControllerBase
                 .Select(entry => (entry.Record, entry.CreatedAt!.Value))
                 .ToArray();
 
-            watchedEpisodes = GetLatestWatchedEpisodes(request.UserId, latestMatchesCount)
-                .OrderBy(entry => entry.PlayedAtUtc)
-                .ToArray();
+            watchedEpisodes = Array.Empty<(Episode Episode, DateTimeOffset PlayedAtUtc)>();
         }
         else
         {
@@ -302,7 +301,14 @@ public sealed class PopfeedController : ControllerBase
         }
 
         result.WrongReviewCount = wrongEpisodeReviews.Length;
-        result.ReplayCandidateCount = watchedEpisodes.Length;
+
+        var latestRepairPlan = useLatestCountMode
+            ? BuildLatestRepairPlan(request.UserId, wrongEpisodeReviews)
+            : Array.Empty<(AtProtoRecord<PopfeedReviewRecord> WrongReview, Episode Episode, DateTimeOffset PlayedAtUtc)>();
+
+        result.ReplayCandidateCount = useLatestCountMode
+            ? latestRepairPlan.Length
+            : watchedEpisodes.Length;
 
         if (request.DryRun)
         {
@@ -313,44 +319,84 @@ public sealed class PopfeedController : ControllerBase
             return Ok(result);
         }
 
-        foreach (var watchedEpisode in watchedEpisodes)
+        if (useLatestCountMode)
         {
-            result.ReplayAttempted++;
-            try
+            foreach (var plannedRepair in latestRepairPlan)
             {
-                await RetrySyncEpisodeAsync(
-                    request.UserId,
-                    watchedEpisode.Episode,
-                    watchedEpisode.PlayedAtUtc,
-                    cancellationToken).ConfigureAwait(false);
-                result.ReplaySucceeded++;
+                result.ReplayAttempted++;
+                try
+                {
+                    await RetrySyncEpisodeAsync(
+                        request.UserId,
+                        plannedRepair.Episode,
+                        plannedRepair.PlayedAtUtc,
+                        cancellationToken).ConfigureAwait(false);
+                    result.ReplaySucceeded++;
 
-                // Pace requests to reduce ATProto rate-limit pressure.
-                await Task.Delay(1200, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Failed to replay episode {ItemName} ({ItemId}) during Popfeed repair.",
-                    watchedEpisode.Episode.Name,
-                    watchedEpisode.Episode.Id);
+                    var wrongRkey = GetRecordKey(plannedRepair.WrongReview.Uri);
+                    await _atProtoClient.DeleteRecordAsync(
+                        userConfiguration.PdsUrl,
+                        session,
+                        "social.popfeed.feed.review",
+                        wrongRkey,
+                        cancellationToken).ConfigureAwait(false);
+                    result.DeletedWrongReviews++;
+
+                    // Pace requests to reduce ATProto rate-limit pressure.
+                    await Task.Delay(1200, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to repair review {ReviewUri} using episode {ItemName} ({ItemId}).",
+                        plannedRepair.WrongReview.Uri,
+                        plannedRepair.Episode.Name,
+                        plannedRepair.Episode.Id);
+                }
             }
         }
-
-        // Safety guard: only delete wrong reviews once replay fully succeeded.
-        if (result.ReplaySucceeded == result.ReplayAttempted && result.ReplayAttempted > 0)
+        else
         {
-            foreach (var wrongReview in wrongEpisodeReviews)
+            foreach (var watchedEpisode in watchedEpisodes)
             {
-                var rkey = GetRecordKey(wrongReview.Record.Uri);
-                await _atProtoClient.DeleteRecordAsync(
-                    userConfiguration.PdsUrl,
-                    session,
-                    "social.popfeed.feed.review",
-                    rkey,
-                    cancellationToken).ConfigureAwait(false);
-                result.DeletedWrongReviews++;
+                result.ReplayAttempted++;
+                try
+                {
+                    await RetrySyncEpisodeAsync(
+                        request.UserId,
+                        watchedEpisode.Episode,
+                        watchedEpisode.PlayedAtUtc,
+                        cancellationToken).ConfigureAwait(false);
+                    result.ReplaySucceeded++;
+
+                    // Pace requests to reduce ATProto rate-limit pressure.
+                    await Task.Delay(1200, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to replay episode {ItemName} ({ItemId}) during Popfeed repair.",
+                        watchedEpisode.Episode.Name,
+                        watchedEpisode.Episode.Id);
+                }
+            }
+
+            // Safety guard: only delete wrong reviews once replay fully succeeded.
+            if (result.ReplaySucceeded == result.ReplayAttempted && result.ReplayAttempted > 0)
+            {
+                foreach (var wrongReview in wrongEpisodeReviews)
+                {
+                    var rkey = GetRecordKey(wrongReview.Record.Uri);
+                    await _atProtoClient.DeleteRecordAsync(
+                        userConfiguration.PdsUrl,
+                        session,
+                        "social.popfeed.feed.review",
+                        rkey,
+                        cancellationToken).ConfigureAwait(false);
+                    result.DeletedWrongReviews++;
+                }
             }
         }
 
@@ -505,6 +551,109 @@ public sealed class PopfeedController : ControllerBase
             })
             .OrderByDescending(entry => entry.PlayedAtUtc)
             .Take(latestCount);
+    }
+
+    private (AtProtoRecord<PopfeedReviewRecord> WrongReview, Episode Episode, DateTimeOffset PlayedAtUtc)[] BuildLatestRepairPlan(
+        Guid jellyfinUserId,
+        (AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)[] wrongReviews)
+    {
+        var user = _userManager.GetUserById(jellyfinUserId);
+        if (user is null)
+        {
+            return Array.Empty<(AtProtoRecord<PopfeedReviewRecord> WrongReview, Episode Episode, DateTimeOffset PlayedAtUtc)>();
+        }
+
+        var query = new InternalItemsQuery(user)
+        {
+            Recursive = true,
+            IncludeItemTypes = new[] { BaseItemKind.Episode },
+            EnableTotalRecordCount = false,
+        };
+
+        var playedEpisodes = _libraryManager
+            .GetItemList(query)
+            .OfType<Episode>()
+            .Select(episode => new
+            {
+                Episode = episode,
+                UserData = _userDataManager.GetUserData(user, episode),
+            })
+            .Where(entry => entry.UserData is not null
+                && entry.UserData.Played
+                && entry.UserData.LastPlayedDate.HasValue)
+            .Select(entry =>
+            {
+                var playedAtUtc = new DateTimeOffset(
+                    DateTime.SpecifyKind(entry.UserData!.LastPlayedDate!.Value, DateTimeKind.Utc));
+                return (entry.Episode, PlayedAtUtc: playedAtUtc);
+            })
+            .ToList();
+
+        var plan = new System.Collections.Generic.List<(AtProtoRecord<PopfeedReviewRecord> WrongReview, Episode Episode, DateTimeOffset PlayedAtUtc)>();
+        foreach (var wrongReview in wrongReviews)
+        {
+            var reviewRecord = wrongReview.Record.Value;
+            var bestMatch = playedEpisodes
+                .Where(candidate => EpisodeMatchesReview(candidate.Episode, reviewRecord))
+                .OrderBy(candidate => Math.Abs((candidate.PlayedAtUtc - wrongReview.CreatedAt).TotalSeconds))
+                .FirstOrDefault();
+
+            if (bestMatch.Episode is null)
+            {
+                continue;
+            }
+
+            plan.Add((wrongReview.Record, bestMatch.Episode, bestMatch.PlayedAtUtc));
+            _ = playedEpisodes.Remove(bestMatch);
+        }
+
+        return plan.ToArray();
+    }
+
+    private static bool EpisodeMatchesReview(Episode episode, PopfeedReviewRecord review)
+    {
+        var identifiers = review.Identifiers;
+        if (identifiers.SeasonNumber.HasValue && episode.ParentIndexNumber != identifiers.SeasonNumber.Value)
+        {
+            return false;
+        }
+
+        if (identifiers.EpisodeNumber.HasValue && episode.IndexNumber != identifiers.EpisodeNumber.Value)
+        {
+            return false;
+        }
+
+        var seriesTmdb = GetProviderId(episode.Series, MetadataProvider.Tmdb);
+        var episodeTmdb = GetProviderId(episode, MetadataProvider.Tmdb);
+        var reviewSeriesId = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            ? identifiers.TmdbTvSeriesId
+            : (identifiers.SeasonNumber.HasValue && identifiers.EpisodeNumber.HasValue ? identifiers.TmdbId : null);
+
+        if (!string.IsNullOrWhiteSpace(reviewSeriesId))
+        {
+            if (string.Equals(seriesTmdb, reviewSeriesId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(episodeTmdb, reviewSeriesId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(identifiers.TmdbId)
+            && string.Equals(episodeTmdb, identifiers.TmdbId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetProviderId(IHasProviderIds? item, MetadataProvider provider)
+    {
+        if (item is null)
+        {
+            return null;
+        }
+
+        return item.TryGetProviderId(provider, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
     }
 
     private static bool IsEpisodeReview(PopfeedReviewRecord record)
