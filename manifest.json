@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.5.0",
+        "changelog": "- fix(repair): 🐛 repair and delete latest episode list-item activities",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.5/Jellyfin.Plugin.Popfeed-v0.4.5.zip",
+        "checksum": "24b8d0c6ed218d74bca001821b7cbc12",
+        "timestamp": "2026-05-30T09:39:42.4164368Z"
+      },
+      {
         "version": "0.4.4.0",
         "changelog": "- fix(api): 🐛 disambiguate MetadataProvider enum in controller",
         "targetAbi": "10.11.0.0",
