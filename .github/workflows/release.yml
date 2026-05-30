@@ -209,6 +209,9 @@ jobs:
                       Write-Host 'Stable manifest already up to date.'
                   } else {
                       git commit -m "Update stable manifest for $env:RELEASE_TAG"
-                      git push origin HEAD:$manifestBranch --force
+                      # Rebase on latest branch head to avoid race-condition rollbacks
+                      # when multiple tag workflows run concurrently.
+                      git pull --rebase origin $manifestBranch
+                      git push origin HEAD:$manifestBranch
                   }
                   Pop-Location
