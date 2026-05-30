@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.7.0",
+        "changelog": "- fix(repair): 🐛 block delete when replay did not sync",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.7/Jellyfin.Plugin.Popfeed-v0.4.7.zip",
+        "checksum": "171676705589380691876933b978d53c",
+        "timestamp": "2026-05-30T10:01:48.6746959Z"
+      },
+      {
         "version": "0.4.6.0",
         "changelog": "- fix(plugin): 🐛 prevent self-cleanup on restart",
         "targetAbi": "10.11.0.0",
