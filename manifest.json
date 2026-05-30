@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.1.0",
+        "changelog": "- fix(api): 🐛 pass user object to GetUserData overload",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.1/Jellyfin.Plugin.Popfeed-v0.4.1.zip",
+        "checksum": "c4cebcdbaf9b57ec0abbfba1d826d99c",
+        "timestamp": "2026-05-30T09:16:03.2238241Z"
+      },
+      {
         "version": "0.3.8.0",
         "changelog": "- feat(mediator): ✨ sync in-progress state on playback start/finish",
         "targetAbi": "10.11.0.0",
