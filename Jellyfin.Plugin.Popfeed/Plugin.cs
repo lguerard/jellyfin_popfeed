@@ -72,8 +72,10 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
                 return;
             }
 
-            var currentVersion = GetCurrentPluginVersion();
             var directoryPrefixes = GetPluginDirectoryPrefixes();
+            var currentVersion = GetCurrentPluginVersion(
+                currentDirectory,
+                directoryPrefixes);
             var candidateDirectories = new Collection<DirectoryInfo>();
 
             foreach (var prefix in directoryPrefixes)
@@ -134,8 +136,22 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         }
     }
 
-    private Version GetCurrentPluginVersion()
+    private Version GetCurrentPluginVersion(
+        string currentDirectory,
+        IReadOnlyCollection<string> prefixes)
     {
+        var directoryName = Path.GetFileName(currentDirectory);
+        if (!string.IsNullOrWhiteSpace(directoryName))
+        {
+            var parsedDirectoryVersion = TryParseDirectoryVersion(
+                directoryName,
+                prefixes);
+            if (parsedDirectoryVersion is not null)
+            {
+                return parsedDirectoryVersion;
+            }
+        }
+
         return GetType().Assembly.GetName().Version ?? new Version(0, 0, 0, 0);
     }
 
