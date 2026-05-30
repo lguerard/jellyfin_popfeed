@@ -1,8 +1,8 @@
 using System;
 using System.Linq;
 using System.Net.Mime;
-using System.Threading;
 using System.Threading.Tasks;
+using System.Threading;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.Popfeed.Models;
 using MediaBrowser.Common.Api;
@@ -313,31 +313,20 @@ public sealed class PopfeedController : ControllerBase
             return Ok(result);
         }
 
-        foreach (var wrongReview in wrongEpisodeReviews)
-        {
-            var rkey = GetRecordKey(wrongReview.Record.Uri);
-            await _atProtoClient.DeleteRecordAsync(
-                userConfiguration.PdsUrl,
-                session,
-                "social.popfeed.feed.review",
-                rkey,
-                cancellationToken).ConfigureAwait(false);
-            result.DeletedWrongReviews++;
-        }
-
         foreach (var watchedEpisode in watchedEpisodes)
         {
             result.ReplayAttempted++;
             try
             {
-                await _syncService.SyncPlaystateAsync(
+                await RetrySyncEpisodeAsync(
                     request.UserId,
                     watchedEpisode.Episode,
-                    true,
-                    false,
                     watchedEpisode.PlayedAtUtc,
                     cancellationToken).ConfigureAwait(false);
                 result.ReplaySucceeded++;
+
+                // Pace requests to reduce ATProto rate-limit pressure.
+                await Task.Delay(1200, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -349,11 +338,73 @@ public sealed class PopfeedController : ControllerBase
             }
         }
 
+        // Safety guard: only delete wrong reviews once replay fully succeeded.
+        if (result.ReplaySucceeded == result.ReplayAttempted && result.ReplayAttempted > 0)
+        {
+            foreach (var wrongReview in wrongEpisodeReviews)
+            {
+                var rkey = GetRecordKey(wrongReview.Record.Uri);
+                await _atProtoClient.DeleteRecordAsync(
+                    userConfiguration.PdsUrl,
+                    session,
+                    "social.popfeed.feed.review",
+                    rkey,
+                    cancellationToken).ConfigureAwait(false);
+                result.DeletedWrongReviews++;
+            }
+        }
+
         result.Success = true;
         result.Message = useLatestCountMode
-            ? $"Deleted {result.DeletedWrongReviews} latest episode matches and replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes."
-            : $"Deleted {result.DeletedWrongReviews} wrong episode reviews and replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes.";
+            ? $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} latest wrong matches after successful replay."
+            : $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} wrong episode reviews after successful replay.";
         return Ok(result);
+    }
+
+    private async Task RetrySyncEpisodeAsync(
+        Guid jellyfinUserId,
+        Episode episode,
+        DateTimeOffset playedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var maxAttempts = 4;
+        var delayMs = 2000;
+        Exception? lastException = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await _syncService.SyncPlaystateAsync(
+                    jellyfinUserId,
+                    episode,
+                    true,
+                    false,
+                    playedAtUtc,
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (Exception ex) when (IsRateLimitError(ex) && attempt < maxAttempts)
+            {
+                lastException = ex;
+                _logger.LogWarning(
+                    ex,
+                    "Rate limited while replaying {ItemName} ({ItemId}). Retrying attempt {Attempt}/{MaxAttempts}.",
+                    episode.Name,
+                    episode.Id,
+                    attempt,
+                    maxAttempts);
+                await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+                delayMs *= 2;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                break;
+            }
+        }
+
+        throw lastException ?? new InvalidOperationException("Episode replay failed without an error.");
     }
 
     private async Task<System.Collections.Generic.List<AtProtoRecord<PopfeedReviewRecord>>> LoadAllReviewRecordsAsync(
@@ -483,5 +534,15 @@ public sealed class PopfeedController : ControllerBase
         }
 
         return segments[^1];
+    }
+
+    private static bool IsRateLimitError(Exception ex)
+    {
+        if (ex.Message.Contains("429", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return ex.Message.Contains("too many requests", StringComparison.OrdinalIgnoreCase);
     }
 }
