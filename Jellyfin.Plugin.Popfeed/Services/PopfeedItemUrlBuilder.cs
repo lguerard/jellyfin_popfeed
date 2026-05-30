@@ -24,7 +24,8 @@ internal static class PopfeedItemUrlBuilder
 
         var identifiers = mappedItem.Identifiers;
 
-        if (mappedItem.CreativeWorkType == "tv_episode")
+        if (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.Ordinal)
+            || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.Ordinal))
         {
             var episode = sourceItem as Episode;
             var tvSeriesId = FirstNonEmpty(
@@ -38,7 +39,7 @@ internal static class PopfeedItemUrlBuilder
                 && episodeNumber.HasValue)
             {
                 return new PopfeedMappedItem(
-                    "tv_episode",
+                    mappedItem.CreativeWorkType,
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
@@ -55,7 +56,7 @@ internal static class PopfeedItemUrlBuilder
             if (!string.IsNullOrWhiteSpace(identifiers.TmdbId))
             {
                 return new PopfeedMappedItem(
-                    "tv_episode",
+                    mappedItem.CreativeWorkType,
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
