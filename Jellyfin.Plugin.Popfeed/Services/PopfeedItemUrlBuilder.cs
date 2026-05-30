@@ -39,7 +39,10 @@ internal static class PopfeedItemUrlBuilder
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
-                        TmdbId = identifiers.TmdbId,
+                        // Keep canonical tv-episode coordinates only. Some Popfeed
+                        // surfaces prioritize TmdbId when present and can route to
+                        // legacy /episode/{id} links instead of season/episode URLs.
+                        TmdbId = null,
                         TmdbTvSeriesId = tvSeriesId,
                         SeasonNumber = seasonNumber,
                         EpisodeNumber = episodeNumber,
