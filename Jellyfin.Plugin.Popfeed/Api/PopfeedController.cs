@@ -214,7 +214,9 @@ public sealed class PopfeedController : ControllerBase
         }
 
         var latestMatchesCount = Math.Clamp(request.LatestMatchesCount, 0, 500);
-        var useLatestCountMode = latestMatchesCount > 0;
+        var replayLatestJellyfinEpisodesCount = Math.Clamp(request.ReplayLatestJellyfinEpisodesCount, 0, 500);
+        var useReplayLatestJellyfinMode = replayLatestJellyfinEpisodesCount > 0;
+        var useLatestCountMode = !useReplayLatestJellyfinMode && latestMatchesCount > 0;
         var markerTitle = string.IsNullOrWhiteSpace(request.MarkerTitle)
             ? "Project Hail Mary"
             : request.MarkerTitle.Trim();
@@ -239,7 +241,15 @@ public sealed class PopfeedController : ControllerBase
         (AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)[] wrongEpisodeListItems;
         (Episode Episode, DateTimeOffset PlayedAtUtc)[] watchedEpisodes;
 
-        if (useLatestCountMode)
+        if (useReplayLatestJellyfinMode)
+        {
+            wrongEpisodeReviews = Array.Empty<(AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)>();
+            wrongEpisodeListItems = Array.Empty<(AtProtoRecord<PopfeedListItemRecord> Record, DateTimeOffset CreatedAt)>();
+            watchedEpisodes = GetLatestWatchedEpisodes(request.UserId, replayLatestJellyfinEpisodesCount)
+                .OrderBy(entry => entry.PlayedAtUtc)
+                .ToArray();
+        }
+        else if (useLatestCountMode)
         {
             wrongEpisodeReviews = Array.Empty<(AtProtoRecord<PopfeedReviewRecord> Record, DateTimeOffset CreatedAt)>();
             var allListItems = await LoadAllListItemRecordsAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
@@ -317,11 +327,28 @@ public sealed class PopfeedController : ControllerBase
         result.ReplayCandidateCount = useLatestCountMode
             ? latestRepairPlan.Length
             : watchedEpisodes.Length;
+        result.ReplayEpisodes = useLatestCountMode
+            ? latestRepairPlan
+                .Select(entry => BuildReplayPreview(
+                    entry.Episode,
+                    entry.PlayedAtUtc,
+                    entry.WrongListItem.Uri,
+                    true))
+                .ToArray()
+            : watchedEpisodes
+                .Select(entry => BuildReplayPreview(
+                    entry.Episode,
+                    entry.PlayedAtUtc,
+                    null,
+                    false))
+                .ToArray();
 
         if (request.DryRun)
         {
             result.Success = true;
-            result.Message = useLatestCountMode
+            result.Message = useReplayLatestJellyfinMode
+                ? $"Dry run: found {result.ReplayCandidateCount} latest Jellyfin watched episodes to replay (replay-only, no deletions)."
+                : useLatestCountMode
                 ? $"Dry run: found {result.WrongReviewCount} latest episode matches to repair and {result.ReplayCandidateCount} watched episodes to replay."
                 : $"Dry run: found {result.WrongReviewCount} wrong episode reviews after marker and {result.ReplayCandidateCount} watched episodes to replay.";
             return Ok(result);
@@ -409,10 +436,32 @@ public sealed class PopfeedController : ControllerBase
         }
 
         result.Success = true;
-        result.Message = useLatestCountMode
+        result.Message = useReplayLatestJellyfinMode
+            ? $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} latest Jellyfin watched episodes (replay-only, no deletions)."
+            : useLatestCountMode
             ? $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} latest wrong matches after successful replay."
             : $"Replayed {result.ReplaySucceeded}/{result.ReplayAttempted} watched episodes. Deleted {result.DeletedWrongReviews} wrong episode reviews after successful replay.";
         return Ok(result);
+    }
+
+    private static PopfeedRepairEpisodeReplayItem BuildReplayPreview(
+        Episode episode,
+        DateTimeOffset playedAtUtc,
+        string? existingListItemUri,
+        bool willDeleteExistingListItem)
+    {
+        return new PopfeedRepairEpisodeReplayItem
+        {
+            EpisodeId = episode.Id,
+            EpisodeTitle = episode.Name,
+            SeriesTitle = episode.Series?.Name,
+            SeasonNumber = episode.ParentIndexNumber,
+            EpisodeNumber = episode.IndexNumber,
+            PlayedAtUtc = playedAtUtc,
+            PopfeedItemUrl = BuildEpisodePopfeedUrl(episode),
+            ExistingListItemUri = existingListItemUri,
+            WillDeleteExistingListItem = willDeleteExistingListItem,
+        };
     }
 
     private async Task RetrySyncEpisodeAsync(
@@ -725,6 +774,56 @@ public sealed class PopfeedController : ControllerBase
     {
         return string.Equals(record.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
             || string.Equals(record.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? BuildEpisodePopfeedUrl(Episode episode)
+    {
+        var mappedItem = MapEpisodeForPopfeed(episode);
+        if (mappedItem is null)
+        {
+            return null;
+        }
+
+        return Services.PopfeedItemUrlBuilder.BuildItemUrl(mappedItem, episode);
+    }
+
+    private static PopfeedMappedItem? MapEpisodeForPopfeed(Episode episode)
+    {
+        if (episode.Series is null || !episode.IndexNumber.HasValue)
+        {
+            return null;
+        }
+
+        var tmdbTvSeriesId = GetProviderId(
+            episode.Series,
+            MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
+        var episodeTmdbId = GetProviderId(
+            episode,
+            MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
+
+        var identifiers = new PopfeedIdentifiers
+        {
+            ImdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId)
+                ? GetProviderId(episode, MediaBrowser.Model.Entities.MetadataProvider.Imdb)
+                : null,
+            TmdbId = episodeTmdbId,
+            TmdbTvSeriesId = tmdbTvSeriesId,
+            SeasonNumber = episode.ParentIndexNumber,
+            EpisodeNumber = episode.IndexNumber,
+        };
+
+        var hasEpisodeShape = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            && identifiers.SeasonNumber.HasValue
+            && identifiers.EpisodeNumber.HasValue;
+        var hasStandaloneId = !string.IsNullOrWhiteSpace(identifiers.ImdbId)
+            || !string.IsNullOrWhiteSpace(identifiers.TmdbId);
+
+        if (!hasEpisodeShape && !hasStandaloneId)
+        {
+            return null;
+        }
+
+        return new PopfeedMappedItem("tv_episode", identifiers);
     }
 
     private static DateTimeOffset? ParseRecordTimestamp(string? createdAt)

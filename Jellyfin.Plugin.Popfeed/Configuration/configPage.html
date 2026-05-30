@@ -326,9 +326,9 @@
             <div class="popfeedSection">
               <h2>Repair Recent Episode Activities</h2>
               <div class="fieldDescription">
-                Repair the latest wrong TV episode activities by count. Example:
-                entering 5 repairs the latest 5 episode matches for the selected
-                user.
+                Repair wrong episode matches by count, or replay the latest
+                watched Jellyfin TV episodes without deleting existing Popfeed
+                entries. Dry runs now include the computed Popfeed episode URLs.
               </div>
 
               <div class="popfeedGrid">
@@ -355,6 +355,22 @@
                     min="1"
                     step="1"
                     value="5"
+                    is="emby-input"
+                  />
+                </div>
+
+                <div class="inputContainer">
+                  <label
+                    class="inputLabel inputLabelUnfocused"
+                    for="RepairReplayLatestJellyfinEpisodesCount"
+                    >Replay Latest Jellyfin Episodes (No Delete)</label
+                  >
+                  <input
+                    id="RepairReplayLatestJellyfinEpisodesCount"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value="0"
                     is="emby-input"
                   />
                 </div>
@@ -1067,15 +1083,24 @@
               document.querySelector("#RepairLatestMatchesCount").value,
               10,
             );
+            var replayLatestJellyfinEpisodesCount = parseInt(
+              document.querySelector("#RepairReplayLatestJellyfinEpisodesCount")
+                .value,
+              10,
+            );
 
             if (!userId) {
               Dashboard.alert("Select a Jellyfin user first.");
               return;
             }
 
-            if (!latestMatchesCount || latestMatchesCount < 1) {
+            if (
+              (!latestMatchesCount || latestMatchesCount < 1) &&
+              (!replayLatestJellyfinEpisodesCount ||
+                replayLatestJellyfinEpisodesCount < 1)
+            ) {
               Dashboard.alert(
-                "Enter a valid number of latest matches to repair.",
+                "Enter Latest Matches To Repair or Replay Latest Jellyfin Episodes.",
               );
               return;
             }
@@ -1085,7 +1110,9 @@
 
             apiPost("Popfeed/RepairEpisodeActivities", {
               UserId: userId,
-              LatestMatchesCount: latestMatchesCount,
+              LatestMatchesCount: latestMatchesCount || 0,
+              ReplayLatestJellyfinEpisodesCount:
+                replayLatestJellyfinEpisodesCount || 0,
               DryRun: document.querySelector("#RepairDryRun").checked,
               MarkerTitle: "",
             })
