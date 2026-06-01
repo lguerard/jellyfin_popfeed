@@ -1124,7 +1124,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         CancellationToken cancellationToken)
     {
         var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-        var reviewIdentifiers = BuildReviewIdentifiers(mappedItem, item);
+        var reviewIdentifiers = BuildReviewIdentifiers(mappedItem);
         var reviewCreativeWorkType = GetReviewCreativeWorkType(mappedItem.CreativeWorkType);
         var record = new PopfeedReviewRecord
         {
@@ -1146,25 +1146,28 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return record;
     }
 
-    private static PopfeedIdentifiers BuildReviewIdentifiers(PopfeedMappedItem mappedItem, BaseItem item)
+    private static PopfeedIdentifiers BuildReviewIdentifiers(PopfeedMappedItem mappedItem)
     {
+        var isEpisode = string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase);
+        var hasCanonicalEpisodeShape = !string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbTvSeriesId)
+            && mappedItem.Identifiers.SeasonNumber.HasValue
+            && mappedItem.Identifiers.EpisodeNumber.HasValue;
+
         var identifiers = new PopfeedIdentifiers
         {
             ImdbId = mappedItem.Identifiers.ImdbId,
-            TmdbId = mappedItem.Identifiers.TmdbId,
+            TmdbId = isEpisode ? null : mappedItem.Identifiers.TmdbId,
             TmdbTvSeriesId = mappedItem.Identifiers.TmdbTvSeriesId,
             SeasonNumber = mappedItem.Identifiers.SeasonNumber,
             EpisodeNumber = mappedItem.Identifiers.EpisodeNumber,
         };
 
-        if ((string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
-            && string.IsNullOrWhiteSpace(identifiers.TmdbId)
-            && item is Episode episode
-            && episode.TryGetProviderId(MetadataProvider.Tmdb, out var episodeTmdbId)
-            && !string.IsNullOrWhiteSpace(episodeTmdbId))
+        if (isEpisode && !hasCanonicalEpisodeShape)
         {
-            identifiers.TmdbId = episodeTmdbId;
+            identifiers.TmdbTvSeriesId = null;
+            identifiers.SeasonNumber = null;
+            identifiers.EpisodeNumber = null;
         }
 
         return identifiers;

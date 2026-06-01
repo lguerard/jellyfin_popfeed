@@ -28,12 +28,9 @@ internal static class PopfeedItemUrlBuilder
             || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.Ordinal))
         {
             var episode = sourceItem as Episode;
-            var episodeTmdbId = GetProviderId(episode, MetadataProvider.Tmdb);
-            var tvSeriesId = FirstNonEmpty(
-                identifiers.TmdbTvSeriesId,
-                GetProviderId(episode?.Series, MetadataProvider.Tmdb));
             var seasonNumber = identifiers.SeasonNumber ?? episode?.ParentIndexNumber;
             var episodeNumber = identifiers.EpisodeNumber ?? episode?.IndexNumber;
+            var tvSeriesId = ResolveEpisodeSeriesTmdbId(identifiers, episode);
 
             if (!string.IsNullOrWhiteSpace(tvSeriesId)
                 && seasonNumber.HasValue
@@ -44,34 +41,15 @@ internal static class PopfeedItemUrlBuilder
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
-                        // Keep canonical tv-episode coordinates only. Some Popfeed
-                        // surfaces prioritize TmdbId when present and can route to
-                        // legacy /episode/{id} links instead of season/episode URLs.
-                        // When available from Jellyfin episode metadata, keep the
-                        // true episode TMDb id for Popfeed surfaces that require it.
-                        TmdbId = episodeTmdbId,
+                        // Canonical tv-episode coordinates should drive routing.
+                        TmdbId = null,
                         TmdbTvSeriesId = tvSeriesId,
                         SeasonNumber = seasonNumber,
                         EpisodeNumber = episodeNumber,
                     });
             }
 
-            if (!string.IsNullOrWhiteSpace(identifiers.TmdbId))
-            {
-                return new PopfeedMappedItem(
-                    mappedItem.CreativeWorkType,
-                    new PopfeedIdentifiers
-                    {
-                        ImdbId = identifiers.ImdbId,
-                        // Canonical-only rule: when series coordinates are unavailable,
-                        // keep this as an episode-id fallback and drop season/episode
-                        // to avoid persisting legacy series-shaped identifiers.
-                        TmdbId = identifiers.TmdbId,
-                        TmdbTvSeriesId = null,
-                        SeasonNumber = null,
-                        EpisodeNumber = null,
-                    });
-            }
+            return mappedItem;
         }
 
         if (mappedItem.CreativeWorkType == "tv_season")
@@ -118,8 +96,6 @@ internal static class PopfeedItemUrlBuilder
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue
                 => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
-            "episode" or "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
-                => $"https://popfeed.social/episode/{Uri.EscapeDataString(identifiers.TmdbId)}",
             "tv_season" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
                 && identifiers.SeasonNumber.HasValue
                 => $"https://popfeed.social/season?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}",
@@ -146,6 +122,25 @@ internal static class PopfeedItemUrlBuilder
         return string.IsNullOrWhiteSpace(fallback)
             ? null
             : fallback;
+    }
+
+    private static string? ResolveEpisodeSeriesTmdbId(PopfeedIdentifiers identifiers, Episode? episode)
+    {
+        if (!string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId))
+        {
+            return identifiers.TmdbTvSeriesId;
+        }
+
+        var seriesTmdbId = GetProviderId(episode?.Series, MetadataProvider.Tmdb);
+        if (!string.IsNullOrWhiteSpace(seriesTmdbId))
+        {
+            return seriesTmdbId;
+        }
+
+        // Legacy payloads can store the series id in TmdbId alongside season/episode.
+        return identifiers.SeasonNumber.HasValue && identifiers.EpisodeNumber.HasValue
+            ? identifiers.TmdbId
+            : null;
     }
 
     private static string? GetProviderId(IHasProviderIds? item, MetadataProvider provider)

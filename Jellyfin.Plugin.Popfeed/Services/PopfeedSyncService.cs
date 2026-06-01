@@ -188,9 +188,11 @@ public sealed class PopfeedSyncService
                 : new PopfeedMappedItem("tv_season", identifiers);
         }
 
-        if (item is Episode episode && episode.Series is not null && episode.IndexNumber.HasValue)
+        if (item is Episode episode)
         {
-            var tmdbTvSeriesId = GetProviderId(episode.Series, MetadataProvider.Tmdb);
+            var tmdbTvSeriesId = episode.Series is null
+                ? null
+                : GetProviderId(episode.Series, MetadataProvider.Tmdb);
             var episodeTmdbId = GetProviderId(episode, MetadataProvider.Tmdb);
             var hasCanonicalSeriesCoordinates = !string.IsNullOrWhiteSpace(tmdbTvSeriesId)
                 && episode.ParentIndexNumber.HasValue
@@ -209,11 +211,11 @@ public sealed class PopfeedSyncService
             var hasEpisodeShape = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue;
-            var hasStandaloneId = !string.IsNullOrWhiteSpace(identifiers.ImdbId) || !string.IsNullOrWhiteSpace(identifiers.TmdbId);
 
-            return (!hasEpisodeShape && !hasStandaloneId)
-                ? null
-                : new PopfeedMappedItem("tv_episode", identifiers);
+            // Episodes must carry canonical series/season/episode coordinates.
+            return hasEpisodeShape
+                ? new PopfeedMappedItem("tv_episode", identifiers)
+                : null;
         }
 
         return null;
