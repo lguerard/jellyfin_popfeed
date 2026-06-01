@@ -454,6 +454,55 @@ public sealed class PopfeedEpisodeIdentifierTests
     }
 
     /// <summary>
+    /// A season should be marked complete only when all library episodes in that
+    /// season are present in watched coordinates.
+    /// </summary>
+    [Fact]
+    public void GetCompletedSeasonsForTesting_ReturnsOnlyFullyWatchedSeasons()
+    {
+        var libraryEpisodes = new (int SeasonNumber, int EpisodeNumber)[]
+        {
+            (1, 1),
+            (1, 2),
+            (2, 1),
+            (2, 2),
+        };
+
+        var watchedEpisodes = new (int SeasonNumber, int EpisodeNumber)[]
+        {
+            (1, 1),
+            (1, 2),
+            (2, 1),
+        };
+
+        var completed = PopfeedWatchedListWriter.GetCompletedSeasonsForTesting(
+            libraryEpisodes,
+            watchedEpisodes);
+
+        Assert.Contains(1, completed);
+        Assert.DoesNotContain(2, completed);
+    }
+
+    /// <summary>
+    /// A series should become incomplete when new library episodes are present
+    /// but not yet watched.
+    /// </summary>
+    [Fact]
+    public void IsSeriesCompleteForTesting_ReturnsFalseWhenNewSeasonAppears()
+    {
+        var previouslyComplete = PopfeedWatchedListWriter.IsSeriesCompleteForTesting(
+            [(1, 1), (1, 2)],
+            [(1, 1), (1, 2)]);
+        Assert.True(previouslyComplete);
+
+        var afterNewSeason = PopfeedWatchedListWriter.IsSeriesCompleteForTesting(
+            [(1, 1), (1, 2), (2, 1)],
+            [(1, 1), (1, 2)]);
+
+        Assert.False(afterNewSeason);
+    }
+
+    /// <summary>
     /// A legacy season shape (TmdbId instead of TmdbTvSeriesId) must be rewritten
     /// to canonical form by <see cref="PopfeedItemUrlBuilder.NormalizeMappedItem"/>.
     /// </summary>

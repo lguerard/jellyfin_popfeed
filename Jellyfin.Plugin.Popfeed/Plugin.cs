@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -78,20 +77,10 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             var currentVersion = GetCurrentPluginVersion(
                 currentDirectory,
                 directoryPrefixes);
-            var candidateDirectories = new Collection<DirectoryInfo>();
-
-            foreach (var prefix in directoryPrefixes)
-            {
-                foreach (var directory in pluginsRoot.EnumerateDirectories(prefix + "_*"))
-                {
-                    if (candidateDirectories.Any(existing => string.Equals(existing.FullName, directory.FullName, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        continue;
-                    }
-
-                    candidateDirectories.Add(directory);
-                }
-            }
+            var candidateDirectories = pluginsRoot
+                .EnumerateDirectories()
+                .Where(directory => IsVersionedPluginDirectory(directory.Name, directoryPrefixes))
+                .ToArray();
 
             var parsedVersions = candidateDirectories
                 .Select(directory => new PluginDirectoryVersion(directory, TryParseDirectoryVersion(directory.Name, directoryPrefixes)))
@@ -159,12 +148,18 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     private string[] GetPluginDirectoryPrefixes()
     {
+        var assemblyName = GetType().Assembly.GetName().Name ?? Name;
+
         return new[]
         {
             Name,
-            GetType().Assembly.GetName().Name ?? Name,
+            assemblyName,
+            assemblyName.Replace(".", "-", StringComparison.Ordinal),
+            assemblyName.Replace(".", "_", StringComparison.Ordinal),
+            "jellyfin-plugin-" + Name,
         }
             .Where(prefix => !string.IsNullOrWhiteSpace(prefix))
+            .Select(prefix => prefix.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -173,13 +168,19 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     {
         foreach (var prefix in prefixes)
         {
-            var expectedPrefix = prefix + "_";
-            if (!directoryName.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+            if (!directoryName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                || directoryName.Length <= prefix.Length)
             {
                 continue;
             }
 
-            var versionSuffix = directoryName[expectedPrefix.Length..];
+            var delimiter = directoryName[prefix.Length];
+            if (delimiter != '_' && delimiter != '-')
+            {
+                continue;
+            }
+
+            var versionSuffix = directoryName[(prefix.Length + 1)..];
             var versionText = ExtractVersionPrefix(versionSuffix);
             if (string.IsNullOrWhiteSpace(versionText)
                 || !Version.TryParse(versionText, out var directoryVersion))
@@ -191,6 +192,13 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         }
 
         return null;
+    }
+
+    private static bool IsVersionedPluginDirectory(string directoryName, IReadOnlyCollection<string> prefixes)
+    {
+        return prefixes.Any(prefix =>
+            directoryName.StartsWith(prefix + "_", StringComparison.OrdinalIgnoreCase)
+            || directoryName.StartsWith(prefix + "-", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? ExtractVersionPrefix(string input)
