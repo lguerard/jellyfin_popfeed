@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.30.0",
+        "changelog": "- fix(sync): 🐛 enforce canonical episode routing writes\r\n- fix(sync): 🐛 restore watched-state legacy reconciliation\r\n- fix(release): 🐛 accept prefixed tag versions",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.30/Jellyfin.Plugin.Popfeed-v0.4.30.zip",
+        "checksum": "1605674b8f9b1625fff82bfd2e9b6cee",
+        "timestamp": "2026-06-02T11:12:56.499368Z"
+      },
+      {
         "version": "0.4.29.0",
         "changelog": "- fix(sync): 🐛 reconcile season/series completion state",
         "targetAbi": "10.11.0.0",
