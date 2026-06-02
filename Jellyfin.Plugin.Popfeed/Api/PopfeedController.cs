@@ -945,19 +945,14 @@ public sealed class PopfeedController : ControllerBase
         var tmdbTvSeriesId = GetProviderId(
             episode.Series,
             MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
-        var episodeTmdbId = GetProviderId(
-            episode,
-            MediaBrowser.Model.Entities.MetadataProvider.Tmdb);
         var hasCanonicalSeriesCoordinates = !string.IsNullOrWhiteSpace(tmdbTvSeriesId)
             && episode.ParentIndexNumber.HasValue
             && episode.IndexNumber.HasValue;
 
         var identifiers = new PopfeedIdentifiers
         {
-            ImdbId = string.IsNullOrWhiteSpace(tmdbTvSeriesId)
-                ? GetProviderId(episode, MediaBrowser.Model.Entities.MetadataProvider.Imdb)
-                : null,
-            TmdbId = episodeTmdbId,
+            ImdbId = null,
+            TmdbId = null,
             TmdbTvSeriesId = tmdbTvSeriesId,
             SeasonNumber = hasCanonicalSeriesCoordinates ? episode.ParentIndexNumber : null,
             EpisodeNumber = hasCanonicalSeriesCoordinates ? episode.IndexNumber : null,
@@ -966,15 +961,12 @@ public sealed class PopfeedController : ControllerBase
         var hasEpisodeShape = !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
             && identifiers.SeasonNumber.HasValue
             && identifiers.EpisodeNumber.HasValue;
-        var hasStandaloneId = !string.IsNullOrWhiteSpace(identifiers.ImdbId)
-            || !string.IsNullOrWhiteSpace(identifiers.TmdbId);
-
-        if (!hasEpisodeShape && !hasStandaloneId)
+        if (!hasEpisodeShape)
         {
             return null;
         }
 
-        return new PopfeedMappedItem("tv_episode", identifiers);
+        return new PopfeedMappedItem("episode", identifiers);
     }
 
     private static DateTimeOffset? ParseRecordTimestamp(string? createdAt)
