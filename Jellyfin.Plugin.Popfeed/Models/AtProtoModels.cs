@@ -563,6 +563,8 @@ public sealed class PopfeedIdentifiers
                 && EpisodeNumber == other.EpisodeNumber;
         }
 
+        // Compatibility-only matching so existing legacy episode records can be
+        // reconciled in-place. New writes remain canonical-only.
         if (HasCanonicalEpisodeShape(this) && HasLegacyEpisodeShape(other))
         {
             return string.Equals(TmdbTvSeriesId, other.TmdbId, StringComparison.OrdinalIgnoreCase)
