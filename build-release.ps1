@@ -23,7 +23,11 @@ function Get-NormalizedAssemblyVersion {
         $trimmedVersion = $trimmedVersion.Substring(1)
     }
 
-    $numericPrefix = [regex]::Match($trimmedVersion, '^\d+(?:\.\d+){0,3}').Value
+    # Accept common tag forms such as:
+    # - v0.4.30
+    # - 0.4.30
+    # - jellyfin_popfeed-1.0.1
+    $numericPrefix = [regex]::Match($trimmedVersion, '(?<!\d)\d+(?:\.\d+){0,3}(?!\d)').Value
     if ([string]::IsNullOrWhiteSpace($numericPrefix)) {
         throw "Unable to derive assembly version from '$RawVersion'."
     }
