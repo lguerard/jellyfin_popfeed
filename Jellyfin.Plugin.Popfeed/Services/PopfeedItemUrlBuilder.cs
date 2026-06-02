@@ -27,6 +27,7 @@ internal static class PopfeedItemUrlBuilder
         if (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.Ordinal)
             || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.Ordinal))
         {
+            const string canonicalEpisodeType = "episode";
             var episode = sourceItem as Episode;
             var seasonNumber = identifiers.SeasonNumber ?? episode?.ParentIndexNumber;
             var episodeNumber = identifiers.EpisodeNumber ?? episode?.IndexNumber;
@@ -37,7 +38,7 @@ internal static class PopfeedItemUrlBuilder
                 && episodeNumber.HasValue)
             {
                 return new PopfeedMappedItem(
-                    mappedItem.CreativeWorkType,
+                    canonicalEpisodeType,
                     new PopfeedIdentifiers
                     {
                         ImdbId = identifiers.ImdbId,
@@ -92,7 +93,7 @@ internal static class PopfeedItemUrlBuilder
         {
             "movie" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
                 => $"https://popfeed.social/movie/{Uri.EscapeDataString(identifiers.TmdbId)}",
-            "episode" or "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            "episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue
                 => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
@@ -137,10 +138,7 @@ internal static class PopfeedItemUrlBuilder
             return seriesTmdbId;
         }
 
-        // Legacy payloads can store the series id in TmdbId alongside season/episode.
-        return identifiers.SeasonNumber.HasValue && identifiers.EpisodeNumber.HasValue
-            ? identifiers.TmdbId
-            : null;
+        return null;
     }
 
     private static string? GetProviderId(IHasProviderIds? item, MetadataProvider provider)

@@ -61,10 +61,11 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         mappedItem = PopfeedItemUrlBuilder.NormalizeMappedItem(mappedItem, item);
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
         var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
+        string? resolvedEpisodeTmdbId = null;
 
         if (string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbId))
         {
-            var resolvedEpisodeTmdbId = await ResolveEpisodeTmdbIdFromTvShowProgressAsync(
+            resolvedEpisodeTmdbId = await ResolveEpisodeTmdbIdFromTvShowProgressAsync(
                 userConfiguration,
                 session,
                 watchedListUri,
@@ -72,7 +73,6 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 cancellationToken).ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(resolvedEpisodeTmdbId))
             {
-                mappedItem.Identifiers.TmdbId = resolvedEpisodeTmdbId;
                 _logger.LogInformation(
                     "Resolved missing episode tmdbId from tv_show watchedEpisodes for {ItemName} on account {Identifier}.",
                     title,
@@ -204,6 +204,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 mappedItem,
                 item,
                 timestamp,
+                resolvedEpisodeTmdbId,
                 cancellationToken).ConfigureAwait(false);
 
             if (existingRecord is not null)
@@ -302,6 +303,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         PopfeedMappedItem mappedItem,
         BaseItem item,
         DateTimeOffset timestamp,
+        string? resolvedEpisodeTmdbId,
         CancellationToken cancellationToken)
     {
         if (!string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
@@ -327,9 +329,9 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         {
             SeasonNumber = mappedItem.Identifiers.SeasonNumber.Value,
             EpisodeNumber = mappedItem.Identifiers.EpisodeNumber.Value,
-            TmdbId = string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbId)
-                ? GetProviderId(episode, MetadataProvider.Tmdb)
-                : mappedItem.Identifiers.TmdbId,
+            TmdbId = !string.IsNullOrWhiteSpace(resolvedEpisodeTmdbId)
+                ? resolvedEpisodeTmdbId
+                : GetProviderId(episode, MetadataProvider.Tmdb),
         };
 
         var seriesEpisodes = await LoadSeriesEpisodesFromEpisodeListItemsAsync(

@@ -80,8 +80,12 @@ public sealed class PopfeedUserConfiguration
     {
         return creativeWorkType switch
         {
-            "movie" => WatchedMovieListUri,
-            "episode" or "tv_episode" or "tv_season" or "tv_show" => WatchedTelevisionListUri,
+            "movie" => string.IsNullOrWhiteSpace(WatchedMovieListUri)
+                ? WatchedListUri
+                : WatchedMovieListUri,
+            "episode" or "tv_episode" or "tv_season" or "tv_show" => string.IsNullOrWhiteSpace(WatchedTelevisionListUri)
+                ? WatchedListUri
+                : WatchedTelevisionListUri,
             _ => WatchedListUri,
         };
     }
