@@ -615,6 +615,18 @@
             "checkbox",
             mapping.Enabled !== false,
           );
+          var createRecentList = createInput(
+            "Create Recent List",
+            "mapping-create-recent-list",
+            "checkbox",
+            !!mapping.CreateRecentList,
+          );
+          var recentListName = createInput(
+            "Recent List Name",
+            "mapping-recent-list-name",
+            "text",
+            mapping.RecentListName || "Recent",
+          );
 
           grid.appendChild(identifier.container);
           grid.appendChild(password.container);
@@ -623,6 +635,8 @@
           grid.appendChild(postMode.container);
           grid.appendChild(postToBluesky.container);
           grid.appendChild(enabled.container);
+          grid.appendChild(createRecentList.container);
+          grid.appendChild(recentListName.container);
           row.appendChild(grid);
 
           var watchedListName = document.createElement("input");
@@ -636,6 +650,12 @@
           watchedListUri.className = "mapping-watched-list-uri";
           watchedListUri.value = mapping.WatchedListUri || "";
           row.appendChild(watchedListUri);
+
+          var recentListUri = document.createElement("input");
+          recentListUri.type = "hidden";
+          recentListUri.className = "mapping-recent-list-uri";
+          recentListUri.value = mapping.RecentListUri || "";
+          row.appendChild(recentListUri);
 
           var actions = document.createElement("div");
           actions.className = "popfeedActions";
@@ -664,6 +684,12 @@
                 AppPassword: row.querySelector(".mapping-password").value,
                 PdsUrl: row.querySelector(".mapping-pds-url").value,
                 WatchedListName: row.querySelector(".mapping-watched-list-name")
+                  .value,
+                CreateRecentList: row.querySelector(".mapping-create-recent-list")
+                  .checked,
+                RecentListName: row.querySelector(".mapping-recent-list-name")
+                  .value,
+                RecentListUri: row.querySelector(".mapping-recent-list-uri")
                   .value,
                 BlueskyPostLanguage: row.querySelector(".mapping-post-language")
                   .value,

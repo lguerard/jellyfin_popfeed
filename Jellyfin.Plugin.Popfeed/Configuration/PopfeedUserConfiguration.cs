@@ -53,6 +53,21 @@ public sealed class PopfeedUserConfiguration
     public string WatchedTelevisionListUri { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets a value indicating whether to create a combined Recent list containing all watched items.
+    /// </summary>
+    public bool CreateRecentList { get; set; }
+
+    /// <summary>
+    /// Gets or sets the name for the combined Recent list.
+    /// </summary>
+    public string RecentListName { get; set; } = "Recent";
+
+    /// <summary>
+    /// Gets or sets the cached Recent list URI.
+    /// </summary>
+    public string RecentListUri { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets a value indicating whether watched items should also be posted as activity to Bluesky.
     /// </summary>
     public bool PostWatchedItemsToBluesky { get; set; }
@@ -112,6 +127,15 @@ public sealed class PopfeedUserConfiguration
                 WatchedListUri = uri;
                 break;
         }
+    }
+
+    /// <summary>
+    /// Stores the cached Recent list URI.
+    /// </summary>
+    /// <param name="uri">The Recent list URI.</param>
+    public void SetRecentListUri(string uri)
+    {
+        RecentListUri = uri;
     }
 
     /// <summary>

@@ -61,6 +61,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         mappedItem = PopfeedItemUrlBuilder.NormalizeMappedItem(mappedItem, item);
         LogVerbose("Using native Popfeed activity strategy for {ItemName} with account {Identifier}.", title, userConfiguration.Identifier);
         var watchedListUri = await EnsureWatchedListAsync(userConfiguration, session, mappedItem.CreativeWorkType, cancellationToken).ConfigureAwait(false);
+        var recentListUri = await EnsureRecentListAsync(userConfiguration, session, cancellationToken).ConfigureAwait(false);
         string? resolvedEpisodeTmdbId = null;
 
         if (string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbId))
@@ -196,6 +197,21 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 _logger.LogInformation("Removed duplicate watched list item {ListItemUri} for {ItemName} on account {Identifier}.", duplicateListItem.Uri, title, userConfiguration.Identifier);
             }
 
+            // If Recent list is enabled, also add/update the item there
+            if (recentListUri is not null)
+            {
+                await UpsertListItemAsync(
+                    userConfiguration,
+                    session,
+                    recentListUri,
+                    mappedItem,
+                    title,
+                    desiredStatus,
+                    timestamp,
+                    played,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             await UpsertTvShowEpisodeProgressAsync(
                 userConfiguration,
                 session,
@@ -266,6 +282,18 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                     item,
                     DateTimeOffset.UtcNow,
                     cancellationToken).ConfigureAwait(false);
+
+                // Also remove from Recent list if enabled
+                if (recentListUri is not null)
+                {
+                    var recentMatchingItems = await FindMatchingListItemsAsync(userConfiguration, session, recentListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
+                    foreach (var recentItem in recentMatchingItems)
+                    {
+                        var recentRkey = GetRecordKey(recentItem.Uri);
+                        await _client.DeleteRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, recentRkey, cancellationToken).ConfigureAwait(false);
+                        _logger.LogInformation("Removed item from Recent list for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
+                    }
+                }
             }
 
             return null;
@@ -290,6 +318,18 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 item,
                 DateTimeOffset.UtcNow,
                 cancellationToken).ConfigureAwait(false);
+
+            // Also remove from Recent list if enabled
+            if (recentListUri is not null)
+            {
+                var recentMatchingItems = await FindMatchingListItemsAsync(userConfiguration, session, recentListUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
+                foreach (var recentItem in recentMatchingItems)
+                {
+                    var recentRkey = GetRecordKey(recentItem.Uri);
+                    await _client.DeleteRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, recentRkey, cancellationToken).ConfigureAwait(false);
+                    _logger.LogInformation("Removed item from Recent list for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
+                }
+            }
         }
 
         return null;
@@ -1054,6 +1094,146 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         userConfiguration.SetWatchedListUri(creativeWorkType, created.Uri);
         Plugin.Instance.SaveConfiguration();
         LogVerbose("Created watched list {ListName} for account {Identifier}: {WatchedListUri}", listName, userConfiguration.Identifier, created.Uri);
+        return created.Uri;
+    }
+
+    /// <summary>
+    /// Finds or creates a list item in the specified list for the given identifiers.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="listUri">The target list URI.</param>
+    /// <param name="mappedItem">The mapped item identifiers.</param>
+    /// <param name="title">The display title.</param>
+    /// <param name="desiredStatus">The desired status.</param>
+    /// <param name="timestamp">The timestamp for added/completed dates.</param>
+    /// <param name="played">Whether the item is fully watched.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The created or updated list item record.</returns>
+    private async Task<AtProtoRecord<PopfeedListItemRecord>?> UpsertListItemAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string listUri,
+        PopfeedMappedItem mappedItem,
+        string title,
+        string desiredStatus,
+        DateTimeOffset timestamp,
+        bool played,
+        CancellationToken cancellationToken)
+    {
+        var matchingListItems = await FindMatchingListItemsAsync(userConfiguration, session, listUri, mappedItem.Identifiers, cancellationToken).ConfigureAwait(false);
+        var existingListItem = SelectPreferredListItem(matchingListItems, mappedItem);
+        
+        if (existingListItem is null)
+        {
+            var listItemRecord = new PopfeedListItemRecord
+            {
+                Identifiers = mappedItem.Identifiers,
+                CreativeWorkType = mappedItem.CreativeWorkType,
+                ListUri = listUri,
+                ListType = null,
+                Status = desiredStatus,
+                AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime),
+                CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null,
+                Title = title,
+            };
+
+            var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRecord, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Created list item for {ItemName} in list {ListUri} on account {Identifier}.", title, listUri, userConfiguration.Identifier);
+            return created;
+        }
+        else
+        {
+            // Check if update is needed
+            var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played, null);
+            if (needsUpdate)
+            {
+                existingListItem.Value.Identifiers = mappedItem.Identifiers;
+                existingListItem.Value.CreativeWorkType = mappedItem.CreativeWorkType;
+                existingListItem.Value.Status = desiredStatus;
+                existingListItem.Value.Title = title;
+                existingListItem.Value.CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null;
+                if (string.IsNullOrWhiteSpace(existingListItem.Value.AddedAt))
+                {
+                    existingListItem.Value.AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime);
+                }
+
+                var updated = await _client.PutRecordAsync(
+                    userConfiguration.PdsUrl,
+                    session,
+                    ListItemCollection,
+                    GetRecordKey(existingListItem.Uri),
+                    existingListItem.Value,
+                    cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Updated list item for {ItemName} in list {ListUri} on account {Identifier}.", title, listUri, userConfiguration.Identifier);
+                return updated;
+            }
+            
+            LogVerbose("Keeping existing list item unchanged for {ItemName} in list {ListUri}.", title, listUri);
+            return existingListItem;
+        }
+    }
+
+    /// <summary>
+    /// Ensures the combined Recent list exists, creating it when absent.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user mapping.</param>
+    /// <param name="session">The authenticated ATProto session.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The ATProto URI of the Recent list.</returns>
+    private async Task<string?> EnsureRecentListAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        CancellationToken cancellationToken)
+    {
+        if (!userConfiguration.CreateRecentList)
+        {
+            return null;
+        }
+
+        var listName = userConfiguration.RecentListName?.Trim();
+        if (string.IsNullOrWhiteSpace(listName))
+        {
+            listName = "Recent";
+        }
+
+        var cachedUri = userConfiguration.RecentListUri;
+        if (!string.IsNullOrWhiteSpace(cachedUri))
+        {
+            LogVerbose("Using cached Recent list URI for account {Identifier}: {RecentListUri}", userConfiguration.Identifier, cachedUri);
+            return cachedUri;
+        }
+
+        string? cursor = null;
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListRecord>(userConfiguration.PdsUrl, session, ListCollection, cursor, cancellationToken).ConfigureAwait(false);
+            var existing = page.Records.FirstOrDefault(record => record.Value is not null && string.Equals(record.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                userConfiguration.SetRecentListUri(existing.Uri);
+                Plugin.Instance.SaveConfiguration();
+                LogVerbose("Found existing Recent list {ListName} for account {Identifier}: {RecentListUri}", listName, userConfiguration.Identifier, existing.Uri);
+                return existing.Uri;
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        var newRecord = new PopfeedListRecord
+        {
+            Name = listName,
+            Description = "Created by Jellyfin Popfeed plugin to aggregate recently watched items.",
+            ListType = "recent",
+            CreatedAt = ToAtProtoDateTime(DateTime.UtcNow),
+            Ordered = false,
+        };
+
+        var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListCollection, newRecord, cancellationToken).ConfigureAwait(false);
+        userConfiguration.SetRecentListUri(created.Uri);
+        Plugin.Instance.SaveConfiguration();
+        LogVerbose("Created Recent list {ListName} for account {Identifier}: {RecentListUri}", listName, userConfiguration.Identifier, created.Uri);
         return created.Uri;
     }
 
