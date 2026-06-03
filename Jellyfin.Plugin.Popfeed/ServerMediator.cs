@@ -66,9 +66,15 @@ public sealed class ServerMediator : IHostedService
             var isPlaybackFinished = string.Equals(saveReason, "PlaybackFinished", StringComparison.Ordinal);
             var isTogglePlayed = string.Equals(saveReason, "TogglePlayed", StringComparison.Ordinal);
 
-            // Track in-progress state only on PlaybackStart and PlaybackFinished
+            // PlaybackFinished means the item is now played, not in-progress.
+            // Track in-progress state only on PlaybackStart
             // (not PlaybackProgress, which fires too frequently).
-            var isWatching = !isPlayed && (isPlaybackStart || isPlaybackFinished);
+            if (isPlaybackFinished)
+            {
+                isPlayed = true;
+            }
+
+            var isWatching = !isPlayed && isPlaybackStart;
 
             if (!isPlayed && !isWatching && !isTogglePlayed)
             {
