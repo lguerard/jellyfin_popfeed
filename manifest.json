@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.31.0",
+        "changelog": "- feat(watched): ✨ add combined Recent list for all watched items\r\n- fix(mediator): 🐛 correct PlaybackFinished handling\r\n- fix(watched): 🐛 correct UpsertListItemAsync return type\r\n- fix(watched): 🐛 correct UpsertListItemAsync return type",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.31/Jellyfin.Plugin.Popfeed-v0.4.31.zip",
+        "checksum": "60fba8a5fff6768499a84d6b0f51e0d0",
+        "timestamp": "2026-06-03T11:07:39.477839Z"
+      },
+      {
         "version": "0.4.30.0",
         "changelog": "- fix(sync): 🐛 enforce canonical episode routing writes\r\n- fix(sync): 🐛 restore watched-state legacy reconciliation\r\n- fix(release): 🐛 accept prefixed tag versions",
         "targetAbi": "10.11.0.0",
