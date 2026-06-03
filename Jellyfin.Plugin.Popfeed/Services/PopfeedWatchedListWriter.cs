@@ -1109,8 +1109,8 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
     /// <param name="timestamp">The timestamp for added/completed dates.</param>
     /// <param name="played">Whether the item is fully watched.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The created or updated list item record.</returns>
-    private async Task<AtProtoRecord<PopfeedListItemRecord>?> UpsertListItemAsync(
+    /// <returns>A task.</returns>
+    private async Task UpsertListItemAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
         string listUri,
@@ -1138,9 +1138,8 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 Title = title,
             };
 
-            var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRecord, cancellationToken).ConfigureAwait(false);
+            await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, listItemRecord, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Created list item for {ItemName} in list {ListUri} on account {Identifier}.", title, listUri, userConfiguration.Identifier);
-            return created;
         }
         else
         {
@@ -1158,7 +1157,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                     existingListItem.Value.AddedAt = ToAtProtoDateTime(timestamp.UtcDateTime);
                 }
 
-                var updated = await _client.PutRecordAsync(
+                await _client.PutRecordAsync(
                     userConfiguration.PdsUrl,
                     session,
                     ListItemCollection,
@@ -1166,11 +1165,9 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                     existingListItem.Value,
                     cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("Updated list item for {ItemName} in list {ListUri} on account {Identifier}.", title, listUri, userConfiguration.Identifier);
-                return updated;
             }
             
             LogVerbose("Keeping existing list item unchanged for {ItemName} in list {ListUri}.", title, listUri);
-            return existingListItem;
         }
     }
 
