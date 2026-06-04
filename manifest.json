@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.4.33.0",
+        "changelog": "- fix(plugin): ♻️ add pending-cleanup file to survive systemd cgroup kill",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.4.33/Jellyfin.Plugin.Popfeed-v0.4.33.zip",
+        "checksum": "7c7ec38a6fa105c908996e7f31a00efe",
+        "timestamp": "2026-06-04T09:54:32.758734Z"
+      },
+      {
         "version": "0.4.32.0",
         "changelog": "- fix(watched): 🐛 fix recent list sync and optimize series watch state scans",
         "targetAbi": "10.11.0.0",
