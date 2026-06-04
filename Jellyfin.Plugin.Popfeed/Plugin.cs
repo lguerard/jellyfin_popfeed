@@ -73,6 +73,12 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
                 return;
             }
 
+            // Process any paths left over from the previous run first.
+            // The deferred subprocess approach can be killed by systemd's
+            // KillMode=control-group before it has a chance to clean up;
+            // this file-based approach survives because it runs on startup.
+            ApplyPendingCleanup(pluginsRoot.FullName);
+
             var directoryPrefixes = GetPluginDirectoryPrefixes();
             var currentVersion = GetCurrentPluginVersion(
                 currentDirectory,
@@ -113,6 +119,9 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
             if (remainingDirectories.Count > 0)
             {
+                // Persist paths for the next startup (reliable across systemd restarts),
+                // and also try the best-effort deferred subprocess approach.
+                WritePendingCleanup(pluginsRoot.FullName, remainingDirectories);
                 ScheduleDeferredCleanup(remainingDirectories);
             }
         }
@@ -231,6 +240,52 @@ public sealed class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     }
 
     private sealed record PluginDirectoryVersion(DirectoryInfo Directory, Version? Version);
+
+    private const string PendingCleanupFileName = ".popfeed_pending_cleanup";
+
+    private static void ApplyPendingCleanup(string pluginsRootPath)
+    {
+        var pendingFile = Path.Combine(pluginsRootPath, PendingCleanupFileName);
+        if (!File.Exists(pendingFile))
+        {
+            return;
+        }
+
+        try
+        {
+            var paths = File.ReadAllLines(pendingFile);
+            File.Delete(pendingFile);
+            foreach (var path in paths)
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    TryDeleteDirectory(path);
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static void WritePendingCleanup(string pluginsRootPath, IReadOnlyCollection<string> paths)
+    {
+        try
+        {
+            File.WriteAllLines(
+                Path.Combine(pluginsRootPath, PendingCleanupFileName),
+                paths);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
 
     private static bool TryDeleteDirectory(string directoryPath)
     {
