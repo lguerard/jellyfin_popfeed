@@ -195,6 +195,16 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 _logger.LogInformation("Removed duplicate watched list item {ListItemUri} for {ItemName} on account {Identifier}.", duplicateListItem.Uri, title, userConfiguration.Identifier);
             }
 
+            // Clean up any bare-legacy episode entries (TmdbId = seriesId, no season/episode)
+            // that Matches() cannot find. Safe to call always: exits quickly when none exist.
+            if (!string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbTvSeriesId)
+                && (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase)))
+            {
+                await DeleteBareLegacyEpisodeEntriesAsync(
+                    userConfiguration, session, watchedListUri, mappedItem.Identifiers.TmdbTvSeriesId, cancellationToken).ConfigureAwait(false);
+            }
+
             await UpsertTvShowEpisodeProgressAsync(
                 userConfiguration,
                 session,
@@ -450,14 +460,17 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 
         var existing = tvShowProgressItem.Value;
 
-        var existingEpisode = watchedEpisodes.FirstOrDefault(entry =>
+        // Compare against the stored WatchedEpisodes before the merge so that a
+        // newly-watched episode (absent from the persisted record) sets changed=true.
+        // The merged watchedEpisodes always contains the current episode so checking
+        // it would make changed permanently false for every subsequent sync.
+        var existingEpisode = existing.WatchedEpisodes?.FirstOrDefault(entry =>
             entry.SeasonNumber == watchedEpisode.SeasonNumber
             && entry.EpisodeNumber == watchedEpisode.EpisodeNumber);
 
         var changed = false;
         if (existingEpisode is null)
         {
-            watchedEpisodes.Add(watchedEpisode);
             changed = true;
         }
         else if (string.IsNullOrWhiteSpace(existingEpisode.TmdbId)
@@ -1127,6 +1140,18 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 LogVerbose("Keeping existing list item unchanged for {ItemName} in list {ListUri}.", title, listUri);
             }
         }
+
+        // Clean up bare-legacy episode entries (TmdbId = seriesId, no season/episode coords)
+        // left over from before canonical routing. Matches() cannot find them via normal
+        // identifier comparison, so we do a separate targeted pass here.
+        var bareLegacySeriesId = mappedItem.Identifiers.TmdbTvSeriesId;
+        if (!string.IsNullOrWhiteSpace(bareLegacySeriesId)
+            && (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase)))
+        {
+            await DeleteBareLegacyEpisodeEntriesAsync(
+                userConfiguration, session, listUri, bareLegacySeriesId, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -1301,6 +1326,71 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         }
 
         return matches.ToArray();
+    }
+
+    /// <summary>
+    /// Deletes episode list items in <paramref name="listUri"/> that store the series TMDB ID
+    /// in the legacy <c>TmdbId</c> field with no season or episode coordinates.
+    /// These entries predate canonical routing and cannot be found by
+    /// <see cref="FindMatchingListItemsAsync"/> because <c>Matches()</c> requires at
+    /// least a season number for episode shapes.  The scan explicitly guards on
+    /// <c>CreativeWorkType</c> to avoid touching <c>tv_show</c> progress records,
+    /// which share the same identifier shape.
+    /// </summary>
+    private async Task DeleteBareLegacyEpisodeEntriesAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string listUri,
+        string seriesTmdbId,
+        CancellationToken cancellationToken)
+    {
+        var toDelete = new List<string>();
+        string? cursor = null;
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(
+                userConfiguration.PdsUrl, session, ListItemCollection, cursor, cancellationToken).ConfigureAwait(false);
+
+            foreach (var record in page.Records)
+            {
+                var value = record.Value;
+                if (value is null
+                    || !string.Equals(value.ListUri, listUri, StringComparison.Ordinal)
+                    || !string.Equals(value.Identifiers.TmdbId, seriesTmdbId, StringComparison.OrdinalIgnoreCase)
+                    || value.Identifiers.SeasonNumber.HasValue
+                    || value.Identifiers.EpisodeNumber.HasValue)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(value.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(value.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                toDelete.Add(record.Uri);
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        foreach (var uri in toDelete)
+        {
+            await _client.DeleteRecordAsync(
+                userConfiguration.PdsUrl,
+                session,
+                ListItemCollection,
+                GetRecordKey(uri),
+                cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Removed bare-legacy episode entry {Uri} for series {SeriesTmdbId} from list {ListUri} on account {Identifier}.",
+                uri,
+                seriesTmdbId,
+                listUri,
+                userConfiguration.Identifier);
+        }
     }
 
     private static AtProtoRecord<PopfeedListItemRecord>? SelectPreferredListItem(
