@@ -77,21 +77,24 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         }
 
         // Run once per DID per process lifetime: purge all bare-legacy episode
-        // entries so broken /episode/<seriesId> links and stale WatchedEpisodes
-        // are resolved without requiring every episode to be re-watched.
-        if (_fullCleanupDoneForDid.Add(session.Did))
+        // entries from the Recent list so broken /episode/<seriesId> links are
+        // removed without requiring every episode to be individually re-watched.
+        // The watched list is intentionally left alone here: bare-legacy episode
+        // entries there still mark shows as watched and removing them would
+        // erase historical records.  They are replaced with canonical entries
+        // reactively by the per-series DeleteBareLegacyEpisodeEntriesAsync that
+        // already runs after every episode upsert.
+        if (recentListUri is not null && _fullCleanupDoneForDid.Add(session.Did))
         {
-            await FullCleanupBareLegacyEpisodeEntriesAsync(userConfiguration, session, watchedListUri, cancellationToken).ConfigureAwait(false);
-            if (recentListUri is not null)
+            try
             {
-                try
-                {
-                    await FullCleanupBareLegacyEpisodeEntriesAsync(userConfiguration, session, recentListUri, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed full bare-legacy cleanup of Recent list for account {Identifier}; continuing.", userConfiguration.Identifier);
-                }
+                await FullCleanupBareLegacyEpisodeEntriesAsync(userConfiguration, session, recentListUri, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Remove so the next sync retries rather than skipping permanently.
+                _fullCleanupDoneForDid.Remove(session.Did);
+                _logger.LogWarning(ex, "Failed full bare-legacy cleanup of Recent list for account {Identifier}; will retry on next sync.", userConfiguration.Identifier);
             }
         }
 
