@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.5.0.0",
+        "changelog": "- fix(watched): 🐛 proactively purge all bare-legacy episode entries on startup\r\n- fix(watched): 🐛 scope bare-legacy cleanup to Recent list only; retry on fail\r\n- fix(watched): 🐛 remove all legacy episode paths, canonical-only everywhere\r\n- refactor(plugin): ♻️ deterministic rkeys, session cache, historical sync\r\n- feat(migration): ✨ purge legacy records and re-sync history one-shot\r\n- refactor(api): ♻️ remove obsolete episode repair endpoint and UI\r\n- refactor(model): ♻️ drop identifier matching methods unused after rkey switch\r\n- perf(watched): ⚡ cut per-episode API calls for season markers and posters\r\n- fix(watched): 🐛 correct season/series completion and heal broken list links",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.5.0/Jellyfin.Plugin.Popfeed-v0.5.0.zip",
+        "checksum": "9000c549a38b9e751b8bcda80e656740",
+        "timestamp": "2026-06-08T12:28:37.473405Z"
+      },
+      {
         "version": "0.4.34.0",
         "changelog": "- fix(watched): 🐛 fix tv_show episode tracking and bare-legacy cleanup",
         "targetAbi": "10.11.0.0",
