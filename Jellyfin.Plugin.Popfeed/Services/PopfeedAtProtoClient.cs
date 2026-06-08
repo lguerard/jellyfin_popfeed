@@ -25,9 +25,11 @@ public sealed class PopfeedAtProtoClient
     private const string CreateSessionPath = "/xrpc/com.atproto.server.createSession";
     private const string CreateRecordPath = "/xrpc/com.atproto.repo.createRecord";
     private const string PutRecordPath = "/xrpc/com.atproto.repo.putRecord";
+    private const string GetRecordPath = "/xrpc/com.atproto.repo.getRecord";
     private const string ListRecordsPath = "/xrpc/com.atproto.repo.listRecords";
     private const string DeleteRecordPath = "/xrpc/com.atproto.repo.deleteRecord";
     private const string UploadBlobPath = "/xrpc/com.atproto.repo.uploadBlob";
+    private static readonly TimeSpan _sessionTtl = TimeSpan.FromMinutes(90);
     private const int MaxRequestAttempts = 6;
     private static readonly Regex _waitForRegex = new(@"wait\s+for\s+(\d+)\s*s", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -38,6 +40,7 @@ public sealed class PopfeedAtProtoClient
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<PopfeedAtProtoClient> _logger;
+    private readonly Dictionary<string, (AtProtoSessionResponse Session, DateTimeOffset ExpiresAt)> _sessionCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PopfeedAtProtoClient"/> class.
@@ -48,6 +51,28 @@ public sealed class PopfeedAtProtoClient
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Returns a cached session when still valid, or authenticates and caches a new one.
+    /// Sessions are valid for ~2 hours; the cache refreshes 90 minutes in so the token
+    /// is always at least 30 minutes from expiry when first used within a sync.
+    /// </summary>
+    /// <param name="userConfiguration">The Popfeed user configuration.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A valid authenticated session.</returns>
+    public async Task<AtProtoSessionResponse> GetOrCreateSessionAsync(PopfeedUserConfiguration userConfiguration, CancellationToken cancellationToken)
+    {
+        var cacheKey = $"{userConfiguration.PdsUrl}|{userConfiguration.Identifier}";
+        if (_sessionCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
+        {
+            LogVerbose("Reusing cached ATProto session for {Identifier}.", userConfiguration.Identifier);
+            return cached.Session;
+        }
+
+        var session = await CreateSessionAsync(userConfiguration, cancellationToken).ConfigureAwait(false);
+        _sessionCache[cacheKey] = (session, DateTimeOffset.UtcNow.Add(_sessionTtl));
+        return session;
     }
 
     /// <summary>
@@ -114,6 +139,57 @@ public sealed class PopfeedAtProtoClient
             cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadFromJsonAsync<AtProtoListRecordsResponse<TRecord>>(_jsonOptions, cancellationToken).ConfigureAwait(false);
         return body ?? throw new InvalidOperationException("Empty response from listRecords.");
+    }
+
+    /// <summary>
+    /// Fetches a single record by its deterministic rkey.
+    /// Returns <see langword="null"/> when the record does not exist (HTTP 404).
+    /// </summary>
+    /// <typeparam name="TRecord">The record type.</typeparam>
+    /// <param name="serviceUrl">The PDS URL.</param>
+    /// <param name="session">The current session.</param>
+    /// <param name="collection">The collection NSID.</param>
+    /// <param name="rkey">The record key.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The record, or <see langword="null"/> when absent.</returns>
+    public async Task<AtProtoRecord<TRecord>?> GetRecordAsync<TRecord>(
+        string serviceUrl,
+        AtProtoSessionResponse session,
+        string collection,
+        string rkey,
+        CancellationToken cancellationToken)
+    {
+        var client = CreateAuthorizedClient(serviceUrl, session.AccessJwt);
+        var url = $"{GetRecordPath}?repo={Uri.EscapeDataString(session.Did)}&collection={Uri.EscapeDataString(collection)}&rkey={Uri.EscapeDataString(rkey)}";
+
+        for (var attempt = 1; attempt <= MaxRequestAttempts; attempt++)
+        {
+            using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                LogVerbose("Fetched ATProto record {Collection}/{Rkey}.", collection, rkey);
+                return await response.Content.ReadFromJsonAsync<AtProtoRecord<TRecord>>(_jsonOptions, cancellationToken).ConfigureAwait(false);
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (attempt < MaxRequestAttempts && IsRetryableStatusCode(response.StatusCode))
+            {
+                var delay = GetRetryDelay(response, body, attempt);
+                _logger.LogWarning("ATProto getRecord failed with {StatusCode} on attempt {Attempt}; retrying in {Delay}s.", (int)response.StatusCode, attempt, Math.Ceiling(delay.TotalSeconds));
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            throw new HttpRequestException($"ATProto getRecord failed with {(int)response.StatusCode}: {body}");
+        }
+
+        throw new InvalidOperationException("ATProto getRecord retry loop exhausted.");
     }
 
     /// <summary>

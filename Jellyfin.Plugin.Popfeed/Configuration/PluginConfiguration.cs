@@ -65,6 +65,14 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public bool EnableDebugLogging { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the plugin should sync all previously
+    /// watched items from the Jellyfin library on startup.  Runs once in the background
+    /// two minutes after the plugin loads; uses deterministic rkeys so the sync is
+    /// fully idempotent.
+    /// </summary>
+    public bool EnableHistoricalSync { get; set; }
+
+    /// <summary>
     /// Gets the configured excluded item ids as a normalized set.
     /// </summary>
     /// <returns>The excluded ids.</returns>
