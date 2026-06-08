@@ -225,8 +225,10 @@ public sealed class PopfeedHistoricalSyncTask : IHostedService
     {
         var session = await _client.GetOrCreateSessionAsync(userConfig, cancellationToken).ConfigureAwait(false);
         var removed = 0;
-        removed += await PurgeCollectionAsync<PopfeedListItemRecord>(userConfig, session, ListItemCollection, cancellationToken).ConfigureAwait(false);
-        removed += await PurgeCollectionAsync<PopfeedReviewRecord>(userConfig, session, ReviewCollection, cancellationToken).ConfigureAwait(false);
+        removed += await PurgeCollectionAsync<PopfeedListItemRecord>(
+            userConfig, session, ListItemCollection, r => r.CreativeWorkType, cancellationToken).ConfigureAwait(false);
+        removed += await PurgeCollectionAsync<PopfeedReviewRecord>(
+            userConfig, session, ReviewCollection, r => r.CreativeWorkType, cancellationToken).ConfigureAwait(false);
 
         if (removed > 0)
         {
@@ -234,10 +236,17 @@ public sealed class PopfeedHistoricalSyncTask : IHostedService
         }
     }
 
+    // Creative-work types written by this plugin.  The purge is scoped to these so
+    // records owned by other Popfeed sources sharing the same repo (e.g. books from
+    // a Hardcover sync) are never deleted, even though they also use random TID rkeys.
+    private static readonly System.Collections.Generic.HashSet<string> _ownedCreativeWorkTypes =
+        new(StringComparer.OrdinalIgnoreCase) { "movie", "episode", "tv_episode", "tv_show", "tv_season" };
+
     private async Task<int> PurgeCollectionAsync<TRecord>(
         Configuration.PopfeedUserConfiguration userConfig,
         AtProtoSessionResponse session,
         string collection,
+        Func<TRecord, string?> creativeWorkTypeSelector,
         CancellationToken cancellationToken)
     {
         var legacyRkeys = new System.Collections.Generic.List<string>();
@@ -248,7 +257,15 @@ public sealed class PopfeedHistoricalSyncTask : IHostedService
             foreach (var record in page.Records)
             {
                 var rkey = ExtractRkey(record.Uri);
-                if (!string.IsNullOrEmpty(rkey) && !rkey.Contains('.', StringComparison.Ordinal))
+                if (string.IsNullOrEmpty(rkey) || rkey.Contains('.', StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // Only purge legacy records this plugin owns; leave books, games,
+                // music and anything else from other sources untouched.
+                var creativeWorkType = record.Value is null ? null : creativeWorkTypeSelector(record.Value);
+                if (creativeWorkType is not null && _ownedCreativeWorkTypes.Contains(creativeWorkType))
                 {
                     legacyRkeys.Add(rkey);
                 }
