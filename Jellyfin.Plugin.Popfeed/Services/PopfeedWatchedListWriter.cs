@@ -30,6 +30,11 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
     private readonly PopfeedAtProtoClient _client;
     private readonly ILogger<PopfeedWatchedListWriter> _logger;
 
+    // List URIs verified to exist (and carry the right listType) during this process.
+    // Lets steady-state syncs skip re-scanning the list collection while still
+    // self-healing a stale cached URI on the first sync after startup.
+    private static readonly HashSet<string> _verifiedListUris = new(StringComparer.Ordinal);
+
     private readonly record struct EpisodeCoordinate(int SeasonNumber, int EpisodeNumber);
 
     /// <summary>
@@ -167,6 +172,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 Identifiers = mappedItem.Identifiers,
                 CreativeWorkType = mappedItem.CreativeWorkType,
                 ListUri = recentListUri,
+                ListType = "recent",
                 Status = PopfeedListItemRecord.FinishedStatus,
                 AddedAt = !string.IsNullOrWhiteSpace(existingRecent?.Value.AddedAt)
                     ? existingRecent.Value.AddedAt
@@ -392,7 +398,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         var coordinates = new HashSet<EpisodeCoordinate>();
         if (episode.Series is null)
         {
-            if (TryGetEpisodeCoordinate(episode, out var current))
+            if (TryGetCompletionCoordinate(episode, out var current))
             {
                 coordinates.Add(current);
             }
@@ -402,13 +408,13 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
 
         foreach (var child in episode.Series.GetRecursiveChildren())
         {
-            if (child is Episode seriesEpisode && TryGetEpisodeCoordinate(seriesEpisode, out var coord))
+            if (child is Episode seriesEpisode && TryGetCompletionCoordinate(seriesEpisode, out var coord))
             {
                 coordinates.Add(coord);
             }
         }
 
-        if (coordinates.Count == 0 && TryGetEpisodeCoordinate(episode, out var fallback))
+        if (coordinates.Count == 0 && TryGetCompletionCoordinate(episode, out var fallback))
         {
             coordinates.Add(fallback);
         }
@@ -416,11 +422,29 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         return coordinates;
     }
 
-    private static bool TryGetEpisodeCoordinate(Episode episode, out EpisodeCoordinate coordinate)
+    /// <summary>
+    /// Returns the season/episode coordinate for completion accounting, excluding
+    /// items that must not block a season or series from being marked complete:
+    /// season 0 specials, and virtual (missing/unaired placeholder) episodes the
+    /// user cannot actually watch.
+    /// </summary>
+    private static bool TryGetCompletionCoordinate(Episode episode, out EpisodeCoordinate coordinate)
     {
+        coordinate = default;
+
+        if (episode.IsVirtualItem)
+        {
+            return false;
+        }
+
         if (!episode.ParentIndexNumber.HasValue || !episode.IndexNumber.HasValue)
         {
-            coordinate = default;
+            return false;
+        }
+
+        // Season 0 is the specials bucket; specials never gate completion.
+        if (episode.ParentIndexNumber.Value == 0)
+        {
             return false;
         }
 
@@ -513,48 +537,21 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
     // List ensure (scan once, then cache URI)
     // -------------------------------------------------------------------------
 
-    private async Task<string> EnsureWatchedListAsync(
+    private Task<string> EnsureWatchedListAsync(
         PopfeedUserConfiguration userConfiguration,
         AtProtoSessionResponse session,
         string creativeWorkType,
         CancellationToken cancellationToken)
     {
-        var listName = GetWatchedListName(userConfiguration, creativeWorkType);
-        var cachedUri = userConfiguration.GetWatchedListUri(creativeWorkType);
-        if (!string.IsNullOrWhiteSpace(cachedUri))
-        {
-            return cachedUri;
-        }
-
-        string? cursor = null;
-        do
-        {
-            var page = await _client.ListRecordsAsync<PopfeedListRecord>(userConfiguration.PdsUrl, session, ListCollection, cursor, cancellationToken).ConfigureAwait(false);
-            var existing = page.Records.FirstOrDefault(r => r.Value is not null && string.Equals(r.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null)
-            {
-                userConfiguration.SetWatchedListUri(creativeWorkType, existing.Uri);
-                Plugin.Instance.SaveConfiguration();
-                return existing.Uri;
-            }
-
-            cursor = page.Cursor;
-        }
-        while (!string.IsNullOrWhiteSpace(cursor));
-
-        var newRecord = new PopfeedListRecord
-        {
-            Name = listName,
-            Description = "Created by Jellyfin Popfeed plugin to mirror watched history.",
-            ListType = GetWatchedListType(creativeWorkType),
-            CreatedAt = ToAtProtoDateTime(DateTime.UtcNow),
-            Ordered = false,
-        };
-
-        var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListCollection, newRecord, cancellationToken).ConfigureAwait(false);
-        userConfiguration.SetWatchedListUri(creativeWorkType, created.Uri);
-        Plugin.Instance.SaveConfiguration();
-        return created.Uri;
+        return EnsureListAsync(
+            userConfiguration,
+            session,
+            GetWatchedListName(userConfiguration, creativeWorkType),
+            GetWatchedListType(creativeWorkType),
+            "Created by Jellyfin Popfeed plugin to mirror watched history.",
+            () => userConfiguration.GetWatchedListUri(creativeWorkType),
+            uri => userConfiguration.SetWatchedListUri(creativeWorkType, uri),
+            cancellationToken);
     }
 
     private async Task<string?> EnsureRecentListAsync(
@@ -568,41 +565,119 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         }
 
         var listName = string.IsNullOrWhiteSpace(userConfiguration.RecentListName?.Trim()) ? "Recent" : userConfiguration.RecentListName.Trim();
-        var cachedUri = userConfiguration.RecentListUri;
-        if (!string.IsNullOrWhiteSpace(cachedUri))
+        return await EnsureListAsync(
+            userConfiguration,
+            session,
+            listName,
+            "recent",
+            "Created by Jellyfin Popfeed plugin to aggregate recently watched items.",
+            () => userConfiguration.RecentListUri,
+            userConfiguration.SetRecentListUri,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Resolves the list URI for <paramref name="listName"/>, self-healing a stale
+    /// cached URI that points to a deleted list and correcting a missing or wrong
+    /// <c>listType</c> on the resolved list.  The result is verified once per process
+    /// (tracked in <see cref="_verifiedListUris"/>) so steady-state syncs stay O(1).
+    /// </summary>
+    private async Task<string> EnsureListAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string listName,
+        string expectedListType,
+        string description,
+        Func<string?> getCachedUri,
+        Action<string> setCachedUri,
+        CancellationToken cancellationToken)
+    {
+        var cachedUri = getCachedUri();
+        if (!string.IsNullOrWhiteSpace(cachedUri) && _verifiedListUris.Contains(cachedUri))
         {
             return cachedUri;
         }
 
+        // Single scan of the (small) list collection.
+        var allLists = new List<AtProtoRecord<PopfeedListRecord>>();
         string? cursor = null;
         do
         {
             var page = await _client.ListRecordsAsync<PopfeedListRecord>(userConfiguration.PdsUrl, session, ListCollection, cursor, cancellationToken).ConfigureAwait(false);
-            var existing = page.Records.FirstOrDefault(r => r.Value is not null && string.Equals(r.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null)
-            {
-                userConfiguration.SetRecentListUri(existing.Uri);
-                Plugin.Instance.SaveConfiguration();
-                return existing.Uri;
-            }
-
+            allLists.AddRange(page.Records.Where(r => r.Value is not null));
             cursor = page.Cursor;
         }
         while (!string.IsNullOrWhiteSpace(cursor));
 
+        // 1. Honour the cached URI only when the list still exists in the repo.
+        if (!string.IsNullOrWhiteSpace(cachedUri))
+        {
+            var stillThere = allLists.FirstOrDefault(r => string.Equals(r.Uri, cachedUri, StringComparison.Ordinal));
+            if (stillThere is not null)
+            {
+                await CorrectListTypeAsync(userConfiguration, session, stillThere, expectedListType, cancellationToken).ConfigureAwait(false);
+                _verifiedListUris.Add(cachedUri);
+                return cachedUri;
+            }
+
+            _logger.LogWarning("Cached Popfeed list {CachedUri} no longer exists; re-resolving '{ListName}' by name.", cachedUri, listName);
+        }
+
+        // 2. Resolve by name.
+        var byName = allLists.FirstOrDefault(r => string.Equals(r.Value.Name, listName, StringComparison.OrdinalIgnoreCase));
+        if (byName is not null)
+        {
+            setCachedUri(byName.Uri);
+            Plugin.Instance.SaveConfiguration();
+            await CorrectListTypeAsync(userConfiguration, session, byName, expectedListType, cancellationToken).ConfigureAwait(false);
+            _verifiedListUris.Add(byName.Uri);
+            return byName.Uri;
+        }
+
+        // 3. Create.
         var newRecord = new PopfeedListRecord
         {
             Name = listName,
-            Description = "Created by Jellyfin Popfeed plugin to aggregate recently watched items.",
-            ListType = "recent",
+            Description = description,
+            ListType = expectedListType,
             CreatedAt = ToAtProtoDateTime(DateTime.UtcNow),
             Ordered = false,
         };
-
         var created = await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListCollection, newRecord, cancellationToken).ConfigureAwait(false);
-        userConfiguration.SetRecentListUri(created.Uri);
+        setCachedUri(created.Uri);
         Plugin.Instance.SaveConfiguration();
+        _verifiedListUris.Add(created.Uri);
         return created.Uri;
+    }
+
+    /// <summary>
+    /// Writes back the list record when its <c>listType</c> is missing or differs from
+    /// <paramref name="expectedListType"/>, so older lists created without a type (or
+    /// with the wrong one) render correctly on Popfeed.
+    /// </summary>
+    private async Task CorrectListTypeAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        AtProtoRecord<PopfeedListRecord> list,
+        string expectedListType,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(expectedListType)
+            || string.Equals(list.Value.ListType, expectedListType, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        list.Value.ListType = expectedListType;
+        await _client.PutRecordAsync(
+            userConfiguration.PdsUrl, session, ListCollection, ExtractRkey(list.Uri), list.Value, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Corrected list {Uri} listType to {ListType}.", list.Uri, expectedListType);
+    }
+
+    private static string ExtractRkey(string uri)
+    {
+        var segments = uri.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 0 ? string.Empty : segments[^1];
     }
 
     // -------------------------------------------------------------------------
