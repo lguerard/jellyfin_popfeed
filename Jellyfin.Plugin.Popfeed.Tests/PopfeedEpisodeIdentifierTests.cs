@@ -302,11 +302,10 @@ public sealed class PopfeedEpisodeIdentifierTests
     }
 
     /// <summary>
-    /// A season should be marked complete only when all library episodes in that
-    /// season are present in watched coordinates.
+    /// A season is complete only when every library episode in that season is watched.
     /// </summary>
     [Fact]
-    public void GetCompletedSeasonsForTesting_ReturnsOnlyFullyWatchedSeasons()
+    public void IsSeasonCompleteForTesting_ReturnsTrueOnlyForFullyWatchedSeason()
     {
         var libraryEpisodes = new (int SeasonNumber, int EpisodeNumber)[]
         {
@@ -323,12 +322,10 @@ public sealed class PopfeedEpisodeIdentifierTests
             (2, 1),
         };
 
-        var completed = PopfeedWatchedListWriter.GetCompletedSeasonsForTesting(
-            libraryEpisodes,
-            watchedEpisodes);
-
-        Assert.Contains(1, completed);
-        Assert.DoesNotContain(2, completed);
+        Assert.True(PopfeedWatchedListWriter.IsSeasonCompleteForTesting(libraryEpisodes, watchedEpisodes, 1));
+        Assert.False(PopfeedWatchedListWriter.IsSeasonCompleteForTesting(libraryEpisodes, watchedEpisodes, 2));
+        // A season with no library episodes is never complete.
+        Assert.False(PopfeedWatchedListWriter.IsSeasonCompleteForTesting(libraryEpisodes, watchedEpisodes, 3));
     }
 
     /// <summary>
