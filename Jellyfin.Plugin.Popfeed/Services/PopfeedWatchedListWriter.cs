@@ -26,6 +26,11 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
     private readonly PopfeedAtProtoClient _client;
     private readonly ILogger<PopfeedWatchedListWriter> _logger;
 
+    // Tracks which user DIDs have already had a full bare-legacy cleanup this
+    // plugin session.  The cleanup is idempotent but expensive (full list
+    // scan), so we only run it once per DID per process lifetime.
+    private static readonly HashSet<string> _fullCleanupDoneForDid = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly record struct EpisodeCoordinate(int SeasonNumber, int EpisodeNumber);
 
     /// <summary>
@@ -69,6 +74,25 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to resolve Recent list for {ItemName} on account {Identifier}; Recent list sync skipped.", title, userConfiguration.Identifier);
+        }
+
+        // Run once per DID per process lifetime: purge all bare-legacy episode
+        // entries so broken /episode/<seriesId> links and stale WatchedEpisodes
+        // are resolved without requiring every episode to be re-watched.
+        if (_fullCleanupDoneForDid.Add(session.Did))
+        {
+            await FullCleanupBareLegacyEpisodeEntriesAsync(userConfiguration, session, watchedListUri, cancellationToken).ConfigureAwait(false);
+            if (recentListUri is not null)
+            {
+                try
+                {
+                    await FullCleanupBareLegacyEpisodeEntriesAsync(userConfiguration, session, recentListUri, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed full bare-legacy cleanup of Recent list for account {Identifier}; continuing.", userConfiguration.Identifier);
+                }
+            }
         }
 
         var desiredRecord = await BuildReviewRecordAsync(session, userConfiguration, mappedItem, title, activityText, item, playedAt, cancellationToken).ConfigureAwait(false);
@@ -1388,6 +1412,77 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 "Removed bare-legacy episode entry {Uri} for series {SeriesTmdbId} from list {ListUri} on account {Identifier}.",
                 uri,
                 seriesTmdbId,
+                listUri,
+                userConfiguration.Identifier);
+        }
+    }
+
+    /// <summary>
+    /// Removes every bare-legacy episode entry in <paramref name="listUri"/>:
+    /// any item with <c>CreativeWorkType</c> of "episode" or "tv_episode" that
+    /// stores a TMDB id in <c>TmdbId</c> but has no season or episode number.
+    /// Unlike <see cref="DeleteBareLegacyEpisodeEntriesAsync"/>, this variant
+    /// does not filter by series ID — it cleans all series in one pass so
+    /// stale entries are removed without requiring each episode to be re-watched.
+    /// </summary>
+    private async Task FullCleanupBareLegacyEpisodeEntriesAsync(
+        PopfeedUserConfiguration userConfiguration,
+        AtProtoSessionResponse session,
+        string listUri,
+        CancellationToken cancellationToken)
+    {
+        var toDelete = new List<string>();
+        string? cursor = null;
+        do
+        {
+            var page = await _client.ListRecordsAsync<PopfeedListItemRecord>(
+                userConfiguration.PdsUrl, session, ListItemCollection, cursor, cancellationToken).ConfigureAwait(false);
+
+            foreach (var record in page.Records)
+            {
+                var value = record.Value;
+                if (value is null
+                    || !string.Equals(value.ListUri, listUri, StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(value.Identifiers.TmdbId)
+                    || value.Identifiers.SeasonNumber.HasValue
+                    || value.Identifiers.EpisodeNumber.HasValue)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(value.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(value.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                toDelete.Add(record.Uri);
+            }
+
+            cursor = page.Cursor;
+        }
+        while (!string.IsNullOrWhiteSpace(cursor));
+
+        foreach (var uri in toDelete)
+        {
+            await _client.DeleteRecordAsync(
+                userConfiguration.PdsUrl,
+                session,
+                ListItemCollection,
+                GetRecordKey(uri),
+                cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Full cleanup: removed bare-legacy episode entry {Uri} from list {ListUri} on account {Identifier}.",
+                uri,
+                listUri,
+                userConfiguration.Identifier);
+        }
+
+        if (toDelete.Count > 0)
+        {
+            _logger.LogInformation(
+                "Full cleanup: removed {Count} bare-legacy episode entry/entries from list {ListUri} on account {Identifier}.",
+                toDelete.Count,
                 listUri,
                 userConfiguration.Identifier);
         }
