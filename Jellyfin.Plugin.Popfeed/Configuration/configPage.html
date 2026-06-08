@@ -129,6 +129,23 @@
                   <span>Enable Debug Logging</span>
                 </label>
               </div>
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input
+                    id="EnableHistoricalSync"
+                    type="checkbox"
+                    is="emby-checkbox"
+                  />
+                  <span>Run One-Time History Migration</span>
+                </label>
+                <div class="fieldDescription">
+                  When enabled, two minutes after the next restart the plugin
+                  removes old broken records and re-syncs your entire watched
+                  history with correct links. The flag turns itself off once the
+                  migration finishes.
+                </div>
+              </div>
             </div>
 
             <div class="popfeedSection">
@@ -937,6 +954,8 @@
               ).checked = !!config.RemoveFromWatchedListWhenUnplayed;
               document.querySelector("#EnableDebugLogging").checked =
                 !!config.EnableDebugLogging;
+              document.querySelector("#EnableHistoricalSync").checked =
+                !!config.EnableHistoricalSync;
 
               setSelectOptions(
                 document.querySelector("#ExclusionSearchUser"),
@@ -1189,6 +1208,9 @@
                   ).checked;
                 config.EnableDebugLogging = document.querySelector(
                   "#EnableDebugLogging",
+                ).checked;
+                config.EnableHistoricalSync = document.querySelector(
+                  "#EnableHistoricalSync",
                 ).checked;
 
                 ApiClient.updatePluginConfiguration(
