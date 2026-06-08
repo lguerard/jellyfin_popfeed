@@ -725,46 +725,6 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         };
     }
 
-    internal static bool NeedsReviewUpdate(PopfeedReviewRecord existing, PopfeedReviewRecord merged)
-    {
-        var existingTags = new HashSet<string>(existing.Tags ?? [], StringComparer.Ordinal);
-        var mergedTags = new HashSet<string>(merged.Tags ?? [], StringComparer.Ordinal);
-
-        return !string.Equals(existing.Title, merged.Title, StringComparison.Ordinal)
-            || !string.Equals(existing.Text, merged.Text, StringComparison.Ordinal)
-            || !existing.Identifiers.HasSameValues(merged.Identifiers)
-            || !string.Equals(existing.CreativeWorkType, merged.CreativeWorkType, StringComparison.Ordinal)
-            || !string.Equals(existing.PosterUrl, merged.PosterUrl, StringComparison.Ordinal)
-            || !string.Equals(existing.ReleaseDate, merged.ReleaseDate, StringComparison.Ordinal)
-            || (existing.Poster is null && merged.Poster is not null)
-            || !existingTags.SetEquals(mergedTags);
-    }
-
-    internal static bool NeedsListItemUpdate(
-        PopfeedListItemRecord existing,
-        PopfeedMappedItem mappedItem,
-        string desiredStatus,
-        string title,
-        bool played,
-        string? desiredListType = null)
-    {
-        return !string.Equals(existing.Status, desiredStatus, StringComparison.Ordinal)
-            || !string.Equals(existing.Title, title, StringComparison.Ordinal)
-            || !existing.Identifiers.HasSameValues(mappedItem.Identifiers)
-            || !string.Equals(existing.CreativeWorkType, mappedItem.CreativeWorkType, StringComparison.Ordinal)
-            || (!string.IsNullOrWhiteSpace(desiredListType)
-                && !string.Equals(existing.ListType, desiredListType, StringComparison.OrdinalIgnoreCase))
-            || (played && existing.CompletedAt is null)
-            || (!played && existing.CompletedAt is not null);
-    }
-
-    // -------------------------------------------------------------------------
-    // Delegates back to PopfeedItemUrlBuilder for test access
-    // -------------------------------------------------------------------------
-
-    internal static PopfeedMappedItem NormalizeMappedItemForWatchedUrl(PopfeedMappedItem mappedItem, BaseItem? sourceItem = null)
-        => PopfeedItemUrlBuilder.NormalizeMappedItem(mappedItem, sourceItem);
-
     // -------------------------------------------------------------------------
     // Poster upload
     // -------------------------------------------------------------------------

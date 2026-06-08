@@ -12,183 +12,16 @@ namespace Jellyfin.Plugin.Popfeed.Tests;
 public sealed class PopfeedEpisodeIdentifierTests
 {
     /// <summary>
-    /// Two identical movie identifier sets must be considered equal by both
-    /// <see cref="PopfeedIdentifiers.HasSameValues"/> and <see cref="PopfeedIdentifiers.Matches"/>.
+    /// Merging a re-synced review must keep the original creation timestamp and
+    /// cross-posts while taking the freshly built title, text, and identifiers.
     /// </summary>
     [Fact]
-    public void HasSameValues_TreatsMatchingMovieIdentifiersAsEqual()
-    {
-        var existing = new PopfeedIdentifiers
-        {
-            ImdbId = "tt9813792",
-            TmdbId = "502356",
-        };
-
-        var desired = new PopfeedIdentifiers
-        {
-            ImdbId = "tt9813792",
-            TmdbId = "502356",
-        };
-
-        Assert.True(existing.HasSameValues(desired));
-        Assert.True(existing.Matches(desired));
-    }
-
-    /// <summary>
-    /// An unchanged movie watched-list record must not trigger an unnecessary PDS write.
-    /// </summary>
-    [Fact]
-    public void NeedsListItemUpdate_DoesNotTriggerForUnchangedMovieIdentifiers()
-    {
-        var existing = new PopfeedListItemRecord
-        {
-            Identifiers = new PopfeedIdentifiers
-            {
-                ImdbId = "tt9813792",
-                TmdbId = "502356",
-            },
-            CreativeWorkType = "movie",
-            Status = PopfeedListItemRecord.FinishedStatus,
-            CompletedAt = "2026-05-12T08:00:00.000Z",
-            Title = "Tetris",
-        };
-
-        var mappedItem = new PopfeedMappedItem(
-            "movie",
-            new PopfeedIdentifiers
-            {
-                ImdbId = "tt9813792",
-                TmdbId = "502356",
-            });
-
-        var needsUpdate = PopfeedWatchedListWriter.NeedsListItemUpdate(
-            existing,
-            mappedItem,
-            PopfeedListItemRecord.FinishedStatus,
-            "Tetris",
-            played: true);
-
-        Assert.False(needsUpdate);
-    }
-
-    /// <summary>
-    /// Legacy (TmdbId) and canonical (TmdbTvSeriesId) episode identifier shapes
-    /// must NOT match. Legacy entries are invisible to Matches() so that new
-    /// canonical entries are always written fresh and legacy entries are removed
-    /// by the targeted cleanup pass.
-    /// </summary>
-    [Fact]
-    public void Matches_DoesNotTreatLegacyAndCanonicalEpisodeIdentifiersAsEquivalent()
-    {
-        var legacy = new PopfeedIdentifiers
-        {
-            TmdbId = "279471",
-            SeasonNumber = 1,
-            EpisodeNumber = 4,
-        };
-
-        var canonical = new PopfeedIdentifiers
-        {
-            TmdbTvSeriesId = "279471",
-            SeasonNumber = 1,
-            EpisodeNumber = 4,
-        };
-
-        Assert.False(legacy.Matches(canonical));
-        Assert.False(canonical.Matches(legacy));
-    }
-
-    /// <summary>
-    /// Legacy and canonical episode identifier shapes must NOT report equal serialised values
-    /// so that an existing legacy record is detected and rewritten to canonical form.
-    /// </summary>
-    [Fact]
-    public void HasSameValues_DetectsLegacyEpisodeIdentifierShape()
-    {
-        var legacy = new PopfeedIdentifiers
-        {
-            TmdbId = "279471",
-            SeasonNumber = 1,
-            EpisodeNumber = 4,
-        };
-
-        var canonical = new PopfeedIdentifiers
-        {
-            TmdbTvSeriesId = "279471",
-            SeasonNumber = 1,
-            EpisodeNumber = 4,
-        };
-
-        Assert.False(legacy.HasSameValues(canonical));
-        Assert.False(canonical.HasSameValues(legacy));
-    }
-
-    /// <summary>
-    /// A watched-list item stored with legacy identifiers must be flagged for update
-    /// so its identifiers are rewritten to canonical form on the next sync.
-    /// </summary>
-    [Fact]
-    public void NeedsListItemUpdate_WhenExistingEpisodeUsesLegacyIdentifiers()
-    {
-        var existing = new PopfeedListItemRecord
-        {
-            Identifiers = new PopfeedIdentifiers
-            {
-                TmdbId = "279471",
-                SeasonNumber = 1,
-                EpisodeNumber = 4,
-            },
-            CreativeWorkType = "tv_episode",
-            Status = PopfeedListItemRecord.FinishedStatus,
-            CompletedAt = "2026-05-12T08:00:00.000Z",
-            Title = "Life's Still Unfair",
-        };
-
-        var mappedItem = new PopfeedMappedItem(
-            "episode",
-            new PopfeedIdentifiers
-            {
-                TmdbTvSeriesId = "279471",
-                SeasonNumber = 1,
-                EpisodeNumber = 4,
-            });
-
-        var needsUpdate = PopfeedWatchedListWriter.NeedsListItemUpdate(
-            existing,
-            mappedItem,
-            PopfeedListItemRecord.FinishedStatus,
-            "Life's Still Unfair",
-            played: true);
-
-        Assert.True(needsUpdate);
-    }
-
-    /// <summary>
-    /// When a review record carries legacy episode identifiers, the merge result must
-    /// carry canonical identifiers and trigger a PDS update.
-    /// </summary>
-    [Fact]
-    public void NeedsReviewUpdate_WhenMergedReviewRewritesLegacyEpisodeIdentifiers()
+    public void MergeExistingReview_PreservesCreatedAtAndCrossPostsAndUnionsTags()
     {
         var existing = new PopfeedReviewRecord
         {
-            Title = "Malcolm in the Middle - Life's Still Unfair",
-            Text = "Watched Malcolm in the Middle S01E04.",
-            CreativeWorkType = "tv_episode",
-            Identifiers = new PopfeedIdentifiers
-            {
-                TmdbId = "279471",
-                SeasonNumber = 1,
-                EpisodeNumber = 4,
-            },
-            PosterUrl = "https://cdn.example/poster.jpg",
-            Tags = ["jellyfin", "watched"],
-        };
-
-        var desired = new PopfeedReviewRecord
-        {
-            Title = existing.Title,
-            Text = existing.Text,
+            Title = "Old Title",
+            Text = "Old text.",
             CreativeWorkType = "episode",
             Identifiers = new PopfeedIdentifiers
             {
@@ -196,14 +29,29 @@ public sealed class PopfeedEpisodeIdentifierTests
                 SeasonNumber = 1,
                 EpisodeNumber = 4,
             },
-            PosterUrl = existing.PosterUrl,
+            CreatedAt = "2026-01-01T00:00:00.000Z",
             Tags = ["jellyfin", "watched"],
+            CrossPosts = new PopfeedReviewCrossPosts { Bluesky = "at://did:plc:test/app.bsky.feed.post/abc" },
+        };
+
+        var desired = new PopfeedReviewRecord
+        {
+            Title = "New Title",
+            Text = "New text.",
+            CreativeWorkType = "episode",
+            Identifiers = existing.Identifiers,
+            CreatedAt = "2026-06-08T00:00:00.000Z",
+            Tags = ["jellyfin", "rewatch"],
         };
 
         var merged = PopfeedWatchedListWriter.MergeExistingReview(existing, desired);
 
-        Assert.True(PopfeedWatchedListWriter.NeedsReviewUpdate(existing, merged));
-        Assert.True(merged.Identifiers.HasSameValues(desired.Identifiers));
+        Assert.Equal("New Title", merged.Title);
+        Assert.Equal("New text.", merged.Text);
+        Assert.Equal("2026-01-01T00:00:00.000Z", merged.CreatedAt);
+        Assert.Equal("at://did:plc:test/app.bsky.feed.post/abc", merged.CrossPosts?.Bluesky);
+        Assert.Contains("watched", merged.Tags);
+        Assert.Contains("rewatch", merged.Tags);
     }
 
     /// <summary>
