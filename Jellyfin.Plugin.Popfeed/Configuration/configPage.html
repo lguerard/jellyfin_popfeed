@@ -129,6 +129,23 @@
                   <span>Enable Debug Logging</span>
                 </label>
               </div>
+
+              <div class="checkboxContainer checkboxContainer-withDescription">
+                <label class="emby-checkbox-label">
+                  <input
+                    id="EnableHistoricalSync"
+                    type="checkbox"
+                    is="emby-checkbox"
+                  />
+                  <span>Run One-Time History Migration</span>
+                </label>
+                <div class="fieldDescription">
+                  When enabled, two minutes after the next restart the plugin
+                  removes old broken records and re-syncs your entire watched
+                  history with correct links. The flag turns itself off once the
+                  migration finishes.
+                </div>
+              </div>
             </div>
 
             <div class="popfeedSection">
@@ -321,87 +338,6 @@
               </div>
 
               <div id="RecentStatusList"></div>
-            </div>
-
-            <div class="popfeedSection">
-              <h2>Repair Recent Episode Activities</h2>
-              <div class="fieldDescription">
-                Repair wrong episode matches by count, or replay the latest
-                watched Jellyfin TV episodes without deleting existing Popfeed
-                entries. Dry runs now include the computed Popfeed episode URLs.
-              </div>
-
-              <div class="popfeedGrid">
-                <div class="selectContainer">
-                  <label class="selectLabel" for="RepairUserId"
-                    >Jellyfin User</label
-                  >
-                  <select
-                    is="emby-select"
-                    id="RepairUserId"
-                    class="emby-select-withcolor emby-select"
-                  ></select>
-                </div>
-
-                <div class="inputContainer">
-                  <label
-                    class="inputLabel inputLabelUnfocused"
-                    for="RepairLatestMatchesCount"
-                    >Latest Matches To Repair</label
-                  >
-                  <input
-                    id="RepairLatestMatchesCount"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value="5"
-                    is="emby-input"
-                  />
-                </div>
-
-                <div class="inputContainer">
-                  <label
-                    class="inputLabel inputLabelUnfocused"
-                    for="RepairReplayLatestJellyfinEpisodesCount"
-                    >Replay Latest Jellyfin Episodes (No Delete)</label
-                  >
-                  <input
-                    id="RepairReplayLatestJellyfinEpisodesCount"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value="0"
-                    is="emby-input"
-                  />
-                </div>
-              </div>
-
-              <div class="checkboxContainer checkboxContainer-withDescription">
-                <label class="emby-checkbox-label">
-                  <input
-                    id="RepairDryRun"
-                    type="checkbox"
-                    is="emby-checkbox"
-                    checked
-                  />
-                  <span>Dry Run Only</span>
-                </label>
-              </div>
-
-              <div class="popfeedActions">
-                <button
-                  is="emby-button"
-                  type="button"
-                  class="raised emby-button"
-                  id="RunRepairEpisodesButton"
-                >
-                  <span>Repair Latest Episode Matches</span>
-                </button>
-              </div>
-
-              <div id="RepairEpisodesResult" class="popfeedStatusBox">
-                No repair run yet.
-              </div>
             </div>
 
             <div>
@@ -937,6 +873,8 @@
               ).checked = !!config.RemoveFromWatchedListWhenUnplayed;
               document.querySelector("#EnableDebugLogging").checked =
                 !!config.EnableDebugLogging;
+              document.querySelector("#EnableHistoricalSync").checked =
+                !!config.EnableHistoricalSync;
 
               setSelectOptions(
                 document.querySelector("#ExclusionSearchUser"),
@@ -954,11 +892,6 @@
                 users,
                 true,
                 "All Users",
-              );
-              setSelectOptions(
-                document.querySelector("#RepairUserId"),
-                users,
-                false,
               );
 
               document.querySelector("#PopfeedUserMappings").innerHTML = "";
@@ -1102,59 +1035,6 @@
           });
 
         document
-          .querySelector("#RunRepairEpisodesButton")
-          .addEventListener("click", function () {
-            var userId = document.querySelector("#RepairUserId").value;
-            var latestMatchesCount = parseInt(
-              document.querySelector("#RepairLatestMatchesCount").value,
-              10,
-            );
-            var replayLatestJellyfinEpisodesCount = parseInt(
-              document.querySelector("#RepairReplayLatestJellyfinEpisodesCount")
-                .value,
-              10,
-            );
-
-            if (!userId) {
-              Dashboard.alert("Select a Jellyfin user first.");
-              return;
-            }
-
-            if (
-              (!latestMatchesCount || latestMatchesCount < 1) &&
-              (!replayLatestJellyfinEpisodesCount ||
-                replayLatestJellyfinEpisodesCount < 1)
-            ) {
-              Dashboard.alert(
-                "Enter Latest Matches To Repair or Replay Latest Jellyfin Episodes.",
-              );
-              return;
-            }
-
-            document.querySelector("#RepairEpisodesResult").textContent =
-              "Running repair...";
-
-            apiPost("Popfeed/RepairEpisodeActivities", {
-              UserId: userId,
-              LatestMatchesCount: latestMatchesCount || 0,
-              ReplayLatestJellyfinEpisodesCount:
-                replayLatestJellyfinEpisodesCount || 0,
-              DryRun: document.querySelector("#RepairDryRun").checked,
-              MarkerTitle: "",
-            })
-              .then(function (repairResult) {
-                document.querySelector("#RepairEpisodesResult").textContent =
-                  JSON.stringify(repairResult, null, 2);
-                loadRecentStatuses();
-              })
-              .catch(function (error) {
-                document.querySelector("#RepairEpisodesResult").textContent =
-                  error.message || String(error);
-                loadRecentStatuses();
-              });
-          });
-
-        document
           .querySelector("#StatusUserId")
           .addEventListener("change", function () {
             loadRecentStatuses();
@@ -1189,6 +1069,9 @@
                   ).checked;
                 config.EnableDebugLogging = document.querySelector(
                   "#EnableDebugLogging",
+                ).checked;
+                config.EnableHistoricalSync = document.querySelector(
+                  "#EnableHistoricalSync",
                 ).checked;
 
                 ApiClient.updatePluginConfiguration(

@@ -20,7 +20,6 @@ public sealed class PopfeedSyncService
 {
     private const string BlueskyPostCollection = "app.bsky.feed.post";
     private const int BlueskyPostMaxLength = 300;
-    private readonly SemaphoreSlim _syncLock = new(1, 1);
     private readonly PopfeedAtProtoClient _client;
     private readonly IPopfeedWatchStateWriter[] _watchStateWriters;
     private readonly PopfeedSyncStatusStore _statusStore;
@@ -70,34 +69,6 @@ public sealed class PopfeedSyncService
     public Task<PopfeedSyncTestResult> TestSyncAsync(Guid jellyfinUserId, BaseItem item, bool played, bool dryRun, CancellationToken cancellationToken)
     {
         return ExecuteSyncCoreAsync(jellyfinUserId, item, played, false, DateTimeOffset.UtcNow, !dryRun, "test", cancellationToken);
-    }
-
-    /// <summary>
-    /// Executes a real sync operation for repair workflows and returns the
-    /// full result so callers can validate whether replay actually succeeded.
-    /// </summary>
-    /// <param name="jellyfinUserId">The Jellyfin user id.</param>
-    /// <param name="item">The episode item to replay.</param>
-    /// <param name="played">Whether the item is marked watched.</param>
-    /// <param name="playedAt">The watched timestamp.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>The replay result.</returns>
-    public Task<PopfeedSyncTestResult> ReplaySyncAsync(
-        Guid jellyfinUserId,
-        BaseItem item,
-        bool played,
-        DateTimeOffset? playedAt,
-        CancellationToken cancellationToken)
-    {
-        return ExecuteSyncCoreAsync(
-            jellyfinUserId,
-            item,
-            played,
-            false,
-            playedAt,
-            true,
-            "repair",
-            cancellationToken);
     }
 
     /// <summary>
@@ -351,94 +322,84 @@ public sealed class PopfeedSyncService
             return CompleteResult(result, triggerSource);
         }
 
-        await _syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            try
+            LogVerbose(
+                "Starting Popfeed sync for {ItemName}. UserId={UserId}, Played={Played}, InProgress={InProgress}, Provider={Provider}, Identifier={Identifier}",
+                item.Name,
+                jellyfinUserId,
+                played,
+                inProgress,
+                configuration.WatchStateProvider,
+                userConfiguration.Identifier);
+
+            var session = await _client.GetOrCreateSessionAsync(userConfiguration, cancellationToken).ConfigureAwait(false);
+            var activityResult = await writer.SyncAsync(
+                userConfiguration,
+                session,
+                mapped,
+                item.Name,
+                activityText,
+                item,
+                played,
+                inProgress,
+                playedAt,
+                configuration.RemoveFromWatchedListWhenUnplayed,
+                cancellationToken).ConfigureAwait(false);
+
+            result.CreatedPopfeedActivity = played || inProgress;
+
+            if (shouldPostToBluesky)
             {
-                LogVerbose(
-                    "Starting Popfeed sync for {ItemName}. UserId={UserId}, Played={Played}, InProgress={InProgress}, Provider={Provider}, Identifier={Identifier}",
-                    item.Name,
-                    jellyfinUserId,
-                    played,
-                    inProgress,
-                    configuration.WatchStateProvider,
-                    userConfiguration.Identifier);
-
-                var session = await _client.CreateSessionAsync(userConfiguration, cancellationToken).ConfigureAwait(false);
-                var activityResult = await writer.SyncAsync(
-                    userConfiguration,
-                    session,
-                    mapped,
-                    item.Name,
-                    activityText,
-                    item,
-                    played,
-                    inProgress,
-                    playedAt,
-                    configuration.RemoveFromWatchedListWhenUnplayed,
-                    cancellationToken).ConfigureAwait(false);
-
-                result.CreatedPopfeedActivity = played || inProgress;
-
-                if (shouldPostToBluesky)
+                try
                 {
-                    try
-                    {
-                        var timestamp = playedAt ?? DateTimeOffset.UtcNow;
-                        // Use the shared URL builder; it normalises legacy TmdbId→TmdbTvSeriesId
-                        // before constructing the canonical Popfeed episode/season/movie URL.
-                        var popfeedItemUrl = PopfeedItemUrlBuilder.BuildItemUrl(mapped, item);
-                        var createdPost = await CreateBlueskyPostAsync(
-                            userConfiguration,
-                            session,
-                            item,
-                            userConfiguration.BlueskyPostLanguage,
-                            activityText,
-                            popfeedItemUrl,
-                            activityResult?.Record.Poster,
-                            timestamp,
-                            cancellationToken).ConfigureAwait(false);
-                        result.PostedToBluesky = true;
+                    var timestamp = playedAt ?? DateTimeOffset.UtcNow;
+                    var popfeedItemUrl = PopfeedItemUrlBuilder.BuildItemUrl(mapped, item);
+                    var createdPost = await CreateBlueskyPostAsync(
+                        userConfiguration,
+                        session,
+                        item,
+                        userConfiguration.BlueskyPostLanguage,
+                        activityText,
+                        popfeedItemUrl,
+                        activityResult?.Record.Poster,
+                        timestamp,
+                        cancellationToken).ConfigureAwait(false);
+                    result.PostedToBluesky = true;
 
-                        if (activityResult is not null)
-                        {
-                            activityResult.Record.CrossPosts ??= new PopfeedReviewCrossPosts();
-                            activityResult.Record.CrossPosts.Bluesky = createdPost.Uri;
-                            await _client.PutRecordAsync(
-                                userConfiguration.PdsUrl,
-                                session,
-                                "social.popfeed.feed.review",
-                                GetRecordKey(activityResult.Uri),
-                                activityResult.Record,
-                                cancellationToken).ConfigureAwait(false);
-                        }
-                    }
-                    catch (Exception ex)
+                    if (activityResult is not null)
                     {
-                        _logger.LogError(ex, "Created Popfeed activity for {ItemName}, but failed to create the Bluesky post for user {UserId}.", item.Name, jellyfinUserId);
-                        result.Success = false;
-                        result.Executed = true;
-                        result.Message = "Popfeed activity was created, but the Bluesky post failed: " + ex.Message;
-                        return CompleteResult(result, triggerSource);
+                        activityResult.Record.CrossPosts ??= new PopfeedReviewCrossPosts();
+                        activityResult.Record.CrossPosts.Bluesky = createdPost.Uri;
+                        await _client.PutRecordAsync(
+                            userConfiguration.PdsUrl,
+                            session,
+                            "social.popfeed.feed.review",
+                            PopfeedRkeyBuilder.ForReview(mapped),
+                            activityResult.Record,
+                            cancellationToken).ConfigureAwait(false);
                     }
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Created Popfeed activity for {ItemName}, but failed to create the Bluesky post for user {UserId}.", item.Name, jellyfinUserId);
+                    result.Success = false;
+                    result.Executed = true;
+                    result.Message = "Popfeed activity was created, but the Bluesky post failed: " + ex.Message;
+                    return CompleteResult(result, triggerSource);
+                }
+            }
 
-                result.Success = true;
-                result.Executed = true;
-                result.Message = BuildSuccessMessage(played, inProgress, result.PostedToBluesky);
-                return CompleteResult(result, triggerSource);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed Popfeed sync for {ItemName} and user {UserId}.", item.Name, jellyfinUserId);
-                result.Message = "Remote sync failed: " + ex.Message;
-                return CompleteResult(result, triggerSource);
-            }
+            result.Success = true;
+            result.Executed = true;
+            result.Message = BuildSuccessMessage(played, inProgress, result.PostedToBluesky);
+            return CompleteResult(result, triggerSource);
         }
-        finally
+        catch (Exception ex)
         {
-            _syncLock.Release();
+            _logger.LogError(ex, "Failed Popfeed sync for {ItemName} and user {UserId}.", item.Name, jellyfinUserId);
+            result.Message = "Remote sync failed: " + ex.Message;
+            return CompleteResult(result, triggerSource);
         }
     }
 
@@ -768,20 +729,6 @@ public sealed class PopfeedSyncService
     /// Extracts the ATProto record key (rkey) from the trailing segment of a record URI.
     /// </summary>
     /// <param name="uri">The ATProto record URI, e.g.
-    /// <c>at://did:plc:xxx/social.popfeed.feed.review/rkey123</c>.</param>
-    /// <returns>The rkey string.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when the URI has no segments.</exception>
-    private static string GetRecordKey(string uri)
-    {
-        var segments = uri.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (segments.Length == 0)
-        {
-            throw new InvalidOperationException($"Could not extract rkey from URI '{uri}'.");
-        }
-
-        return segments[^1];
-    }
-
     /// <summary>
     /// Truncates a string to <see cref="BlueskyPostMaxLength"/> characters,
     /// appending "..." when the text is shortened.

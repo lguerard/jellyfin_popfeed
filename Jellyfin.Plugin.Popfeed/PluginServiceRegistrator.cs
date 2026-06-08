@@ -18,5 +18,6 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<PopfeedSyncStatusStore>();
         serviceCollection.AddSingleton<PopfeedSyncService>();
         serviceCollection.AddHostedService<ServerMediator>();
+        serviceCollection.AddHostedService<PopfeedHistoricalSyncTask>();
     }
 }
