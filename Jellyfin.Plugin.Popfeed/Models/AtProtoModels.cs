@@ -563,22 +563,6 @@ public sealed class PopfeedIdentifiers
                 && EpisodeNumber == other.EpisodeNumber;
         }
 
-        // Compatibility-only matching so existing legacy episode records can be
-        // reconciled in-place. New writes remain canonical-only.
-        if (HasCanonicalEpisodeShape(this) && HasLegacyEpisodeShape(other))
-        {
-            return string.Equals(TmdbTvSeriesId, other.TmdbId, StringComparison.OrdinalIgnoreCase)
-                && SeasonNumber == other.SeasonNumber
-                && EpisodeNumber == other.EpisodeNumber;
-        }
-
-        if (HasLegacyEpisodeShape(this) && HasCanonicalEpisodeShape(other))
-        {
-            return string.Equals(TmdbId, other.TmdbTvSeriesId, StringComparison.OrdinalIgnoreCase)
-                && SeasonNumber == other.SeasonNumber
-                && EpisodeNumber == other.EpisodeNumber;
-        }
-
         if (IdentifiersMatch(ImdbId, other.ImdbId) && HasMatchingEpisodeShape(other))
         {
             return true;
@@ -624,13 +608,6 @@ public sealed class PopfeedIdentifiers
     private static bool HasCanonicalEpisodeShape(PopfeedIdentifiers identifiers)
     {
         return !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
-            && identifiers.SeasonNumber.HasValue
-            && identifiers.EpisodeNumber.HasValue;
-    }
-
-    private static bool HasLegacyEpisodeShape(PopfeedIdentifiers identifiers)
-    {
-        return !string.IsNullOrWhiteSpace(identifiers.TmdbId)
             && identifiers.SeasonNumber.HasValue
             && identifiers.EpisodeNumber.HasValue;
     }

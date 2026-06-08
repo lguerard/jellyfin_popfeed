@@ -135,54 +135,11 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             else
             {
                 // An existing list item was found; update it only if something meaningful changed.
+                // Legacy episode entries (TmdbId-based) are no longer surfaced by Matches(), so
+                // existingListItem here is always canonical when non-null.
                 var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played, watchedListType);
 
-                // Force-replace when the current item carries canonical episode coordinates but the
-                // stored item uses a legacy identifier shape (TmdbId instead of TmdbTvSeriesId).
-                // The needsUpdate check above only compares exact field values; legacy→canonical
-                // transitions differ structurally and need a delete+recreate to avoid stale records.
-                var shouldForceCanonicalEpisodeRefresh = !needsUpdate
-                    && (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
-                    && !string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbTvSeriesId)
-                    && mappedItem.Identifiers.SeasonNumber.HasValue
-                    && mappedItem.Identifiers.EpisodeNumber.HasValue
-                    && (string.IsNullOrWhiteSpace(existingListItem.Value.Identifiers.TmdbTvSeriesId)
-                        || !existingListItem.Value.Identifiers.SeasonNumber.HasValue
-                        || !existingListItem.Value.Identifiers.EpisodeNumber.HasValue);
-
-                if (shouldForceCanonicalEpisodeRefresh)
-                {
-                    var refreshedRecord = new PopfeedListItemRecord
-                    {
-                        Identifiers = mappedItem.Identifiers,
-                        CreativeWorkType = mappedItem.CreativeWorkType,
-                        ListUri = watchedListUri,
-                        ListType = watchedListType,
-                        Status = desiredStatus,
-                        AddedAt = string.IsNullOrWhiteSpace(existingListItem.Value.AddedAt)
-                            ? ToAtProtoDateTime(timestamp.UtcDateTime)
-                            : existingListItem.Value.AddedAt,
-                        CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null,
-                        Title = title,
-                    };
-
-                    var existingRkey = GetRecordKey(existingListItem.Uri);
-                    await _client.DeleteRecordAsync(
-                        userConfiguration.PdsUrl,
-                        session,
-                        ListItemCollection,
-                        existingRkey,
-                        cancellationToken).ConfigureAwait(false);
-                    await _client.CreateRecordAsync(
-                        userConfiguration.PdsUrl,
-                        session,
-                        ListItemCollection,
-                        refreshedRecord,
-                        cancellationToken).ConfigureAwait(false);
-                    _logger.LogInformation("Replaced canonical watched list item for {ItemName} on account {Identifier}.", title, userConfiguration.Identifier);
-                }
-                else if (needsUpdate)
+                if (needsUpdate)
                 {
                     existingListItem.Value.Identifiers = mappedItem.Identifiers;
                     existingListItem.Value.CreativeWorkType = mappedItem.CreativeWorkType;
@@ -1105,43 +1062,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
         {
             var needsUpdate = NeedsListItemUpdate(existingListItem.Value, mappedItem, desiredStatus, title, played, null);
 
-            // Legacy episode items stored without canonical coordinates (TmdbTvSeriesId/season/episode)
-            // must be replaced rather than patched so Popfeed can construct the correct episode URL.
-            var shouldForceCanonicalEpisodeRefresh = !needsUpdate
-                && (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.OrdinalIgnoreCase))
-                && !string.IsNullOrWhiteSpace(mappedItem.Identifiers.TmdbTvSeriesId)
-                && mappedItem.Identifiers.SeasonNumber.HasValue
-                && mappedItem.Identifiers.EpisodeNumber.HasValue
-                && (string.IsNullOrWhiteSpace(existingListItem.Value.Identifiers.TmdbTvSeriesId)
-                    || !existingListItem.Value.Identifiers.SeasonNumber.HasValue
-                    || !existingListItem.Value.Identifiers.EpisodeNumber.HasValue);
-
-            if (shouldForceCanonicalEpisodeRefresh)
-            {
-                var refreshedRecord = new PopfeedListItemRecord
-                {
-                    Identifiers = mappedItem.Identifiers,
-                    CreativeWorkType = mappedItem.CreativeWorkType,
-                    ListUri = listUri,
-                    Status = desiredStatus,
-                    AddedAt = string.IsNullOrWhiteSpace(existingListItem.Value.AddedAt)
-                        ? ToAtProtoDateTime(timestamp.UtcDateTime)
-                        : existingListItem.Value.AddedAt,
-                    CompletedAt = played ? ToAtProtoDateTime(timestamp.UtcDateTime) : null,
-                    Title = title,
-                };
-
-                await _client.DeleteRecordAsync(
-                    userConfiguration.PdsUrl,
-                    session,
-                    ListItemCollection,
-                    GetRecordKey(existingListItem.Uri),
-                    cancellationToken).ConfigureAwait(false);
-                await _client.CreateRecordAsync(userConfiguration.PdsUrl, session, ListItemCollection, refreshedRecord, cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Replaced canonical list item for {ItemName} in list {ListUri} on account {Identifier}.", title, listUri, userConfiguration.Identifier);
-            }
-            else if (needsUpdate)
+            if (needsUpdate)
             {
                 existingListItem.Value.Identifiers = mappedItem.Identifiers;
                 existingListItem.Value.CreativeWorkType = mappedItem.CreativeWorkType;
@@ -1168,9 +1089,9 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
             }
         }
 
-        // Clean up bare-legacy episode entries (TmdbId = seriesId, no season/episode coords)
-        // left over from before canonical routing. Matches() cannot find them via normal
-        // identifier comparison, so we do a separate targeted pass here.
+        // Clean up any legacy episode entries (TmdbId-based, no TmdbTvSeriesId) left over
+        // from before canonical routing.  Matches() no longer surfaces them, so they must
+        // be deleted in a targeted pass to prevent stale entries accumulating in the list.
         var bareLegacySeriesId = mappedItem.Identifiers.TmdbTvSeriesId;
         if (!string.IsNullOrWhiteSpace(bareLegacySeriesId)
             && (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.OrdinalIgnoreCase)
@@ -1384,8 +1305,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 if (value is null
                     || !string.Equals(value.ListUri, listUri, StringComparison.Ordinal)
                     || !string.Equals(value.Identifiers.TmdbId, seriesTmdbId, StringComparison.OrdinalIgnoreCase)
-                    || value.Identifiers.SeasonNumber.HasValue
-                    || value.Identifiers.EpisodeNumber.HasValue)
+                    || !string.IsNullOrWhiteSpace(value.Identifiers.TmdbTvSeriesId))
                 {
                     continue;
                 }
@@ -1447,8 +1367,7 @@ public sealed class PopfeedWatchedListWriter : IPopfeedWatchStateWriter
                 if (value is null
                     || !string.Equals(value.ListUri, listUri, StringComparison.Ordinal)
                     || string.IsNullOrWhiteSpace(value.Identifiers.TmdbId)
-                    || value.Identifiers.SeasonNumber.HasValue
-                    || value.Identifiers.EpisodeNumber.HasValue)
+                    || !string.IsNullOrWhiteSpace(value.Identifiers.TmdbTvSeriesId))
                 {
                     continue;
                 }

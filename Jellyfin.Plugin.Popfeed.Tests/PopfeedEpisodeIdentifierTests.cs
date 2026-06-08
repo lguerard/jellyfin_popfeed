@@ -73,11 +73,12 @@ public sealed class PopfeedEpisodeIdentifierTests
 
     /// <summary>
     /// Legacy (TmdbId) and canonical (TmdbTvSeriesId) episode identifier shapes
-    /// still match for reconciliation purposes, even though new writes are
-    /// canonical-only.
+    /// must NOT match. Legacy entries are invisible to Matches() so that new
+    /// canonical entries are always written fresh and legacy entries are removed
+    /// by the targeted cleanup pass.
     /// </summary>
     [Fact]
-    public void Matches_TreatsLegacyAndCanonicalEpisodeIdentifiersAsEquivalent()
+    public void Matches_DoesNotTreatLegacyAndCanonicalEpisodeIdentifiersAsEquivalent()
     {
         var legacy = new PopfeedIdentifiers
         {
@@ -93,8 +94,8 @@ public sealed class PopfeedEpisodeIdentifierTests
             EpisodeNumber = 4,
         };
 
-        Assert.True(legacy.Matches(canonical));
-        Assert.True(canonical.Matches(legacy));
+        Assert.False(legacy.Matches(canonical));
+        Assert.False(canonical.Matches(legacy));
     }
 
     /// <summary>
