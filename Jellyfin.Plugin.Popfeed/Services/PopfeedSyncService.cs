@@ -181,8 +181,11 @@ public sealed class PopfeedSyncService
                 && identifiers.EpisodeNumber.HasValue;
 
             // Episodes must carry canonical series/season/episode coordinates.
+            // Use "tv_episode" so Popfeed routes and enriches the episode (a plain
+            // "episode" degrades to a /episode/{id} fallback). NormalizeMappedItem
+            // re-affirms this canonical type.
             return hasEpisodeShape
-                ? new PopfeedMappedItem("episode", identifiers)
+                ? new PopfeedMappedItem("tv_episode", identifiers)
                 : null;
         }
 

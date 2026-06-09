@@ -177,7 +177,7 @@ public sealed class PopfeedEpisodeIdentifierTests
                     EpisodeNumber = 1,
                 }));
 
-        Assert.Equal("episode", normalized.CreativeWorkType);
+        Assert.Equal("tv_episode", normalized.CreativeWorkType);
         Assert.Equal("67997", normalized.Identifiers.TmdbTvSeriesId);
         Assert.Null(normalized.Identifiers.TmdbId);
         Assert.Equal(1, normalized.Identifiers.SeasonNumber);
