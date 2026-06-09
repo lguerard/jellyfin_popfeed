@@ -85,6 +85,84 @@ jobs:
                       artifacts/${{ env.PLUGIN_ASSET_NAME }}
                       artifacts/manifest.json
 
+            - name: Generate changelog
+              shell: pwsh
+              run: |
+                  $ErrorActionPreference = 'Stop'
+                  New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+                  $current = $env:RELEASE_TAG
+
+                  # Resolve the commit range. On a tag push the tag exists, so diff
+                  # against the previous tag reachable from it. On workflow_dispatch the
+                  # tag does not exist yet, so diff the latest tag against HEAD.
+                  git rev-parse --verify --quiet "$current^{commit}" > $null
+                  if ($LASTEXITCODE -eq 0) {
+                      $upper = $current
+                      $prev = (git describe --tags --abbrev=0 "$current^" 2>$null)
+                  } else {
+                      $upper = 'HEAD'
+                      $prev = (git describe --tags --abbrev=0 2>$null)
+                  }
+                  $range = if ([string]::IsNullOrWhiteSpace($prev)) { $upper } else { "$prev..$upper" }
+
+                  $subjects = git log $range --no-merges --pretty=format:'%s'
+                  if ($null -eq $subjects) { $subjects = @() }
+
+                  # Conventional-commit type -> changelog section, in display order.
+                  $sections = [ordered]@{
+                      'feat'     = '### ✨ Features'
+                      'fix'      = '### 🐛 Bug Fixes'
+                      'perf'     = '### ⚡ Performance'
+                      'refactor' = '### ♻️ Refactoring'
+                      'docs'     = '### 📝 Documentation'
+                      'build'    = '### 🏗️ Build'
+                      'ci'       = '### 👷 CI'
+                      'test'     = '### ✅ Tests'
+                      'chore'    = '### 🔧 Chores'
+                  }
+                  $buckets = @{}
+                  $other = New-Object System.Collections.Generic.List[string]
+
+                  foreach ($s in @($subjects)) {
+                      if ($s -match '^(?<type>\w+)(\([^)]*\))?(?<break>!)?:\s*(?<desc>.+)$') {
+                          $type = $matches['type'].ToLower()
+                          # Strip a leading emoji/icon so the description reads cleanly.
+                          $desc = ($matches['desc'] -replace '^[^\p{L}\p{N}]+', '').Trim()
+                          if ($matches['break']) { $desc = "**BREAKING** $desc" }
+                          if ($sections.Contains($type)) {
+                              if (-not $buckets.ContainsKey($type)) {
+                                  $buckets[$type] = New-Object System.Collections.Generic.List[string]
+                              }
+                              $buckets[$type].Add("- $desc")
+                          } else {
+                              $other.Add("- $desc")
+                          }
+                      } elseif (-not [string]::IsNullOrWhiteSpace($s)) {
+                          $other.Add("- $s")
+                      }
+                  }
+
+                  $sb = New-Object System.Text.StringBuilder
+                  foreach ($type in $sections.Keys) {
+                      if ($buckets.ContainsKey($type)) {
+                          [void]$sb.AppendLine($sections[$type])
+                          [void]$sb.AppendLine('')
+                          foreach ($line in $buckets[$type]) { [void]$sb.AppendLine($line) }
+                          [void]$sb.AppendLine('')
+                      }
+                  }
+                  if ($other.Count -gt 0) {
+                      [void]$sb.AppendLine('### Other')
+                      [void]$sb.AppendLine('')
+                      foreach ($line in $other) { [void]$sb.AppendLine($line) }
+                      [void]$sb.AppendLine('')
+                  }
+                  if ($sb.Length -eq 0) { [void]$sb.AppendLine('Maintenance release.') }
+
+                  Set-Content -Path artifacts/release-notes.md -Value $sb.ToString() -Encoding UTF8
+                  Write-Host "----- release-notes.md -----"
+                  Get-Content artifacts/release-notes.md
+
             - name: Publish GitHub release asset
               if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
               uses: softprops/action-gh-release@v2
@@ -94,6 +172,7 @@ jobs:
                   files: |
                       artifacts/${{ env.PLUGIN_ASSET_NAME }}
                       artifacts/manifest.json
+                  body_path: artifacts/release-notes.md
                   generate_release_notes: true
                   prerelease: ${{ github.event_name == 'workflow_dispatch' }}
 
