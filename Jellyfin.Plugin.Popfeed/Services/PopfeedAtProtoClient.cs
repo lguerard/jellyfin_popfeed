@@ -143,7 +143,10 @@ public sealed class PopfeedAtProtoClient
 
     /// <summary>
     /// Fetches a single record by its deterministic rkey.
-    /// Returns <see langword="null"/> when the record does not exist (HTTP 404).
+    /// Returns <see langword="null"/> when the record does not exist. A missing
+    /// record surfaces as HTTP 404 on some PDS implementations and as HTTP 400
+    /// with an <c>error: "RecordNotFound"</c> body on others (e.g. the reference
+    /// Bluesky PDS); both are treated as "absent".
     /// </summary>
     /// <typeparam name="TRecord">The record type.</typeparam>
     /// <param name="serviceUrl">The PDS URL.</param>
@@ -178,6 +181,14 @@ public sealed class PopfeedAtProtoClient
             }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            // The reference PDS returns 400 RecordNotFound (not 404) for a missing record.
+            if (response.StatusCode == HttpStatusCode.BadRequest
+                && body.Contains("RecordNotFound", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
             if (attempt < MaxRequestAttempts && IsRetryableStatusCode(response.StatusCode))
             {
                 var delay = GetRetryDelay(response, body, attempt);
