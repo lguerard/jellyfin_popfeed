@@ -27,7 +27,13 @@ internal static class PopfeedItemUrlBuilder
         if (string.Equals(mappedItem.CreativeWorkType, "episode", StringComparison.Ordinal)
             || string.Equals(mappedItem.CreativeWorkType, "tv_episode", StringComparison.Ordinal))
         {
-            const string canonicalEpisodeType = "episode";
+            // Popfeed's frontend only recognises "tv_episode" as a TV episode: its
+            // link builder produces the canonical /episode?tvId=&seasonNumber=&episodeNumber=
+            // URL and runs TMDB enrichment exclusively for that value. A plain
+            // "episode" falls through to a generic /episode/{id} fallback and is
+            // left un-enriched. The deterministic rkeys (w.ep/r.ep/rv.ep) are
+            // identical for both, so this only flips the stored creativeWorkType.
+            const string canonicalEpisodeType = "tv_episode";
             var episode = sourceItem as Episode;
             var seasonNumber = identifiers.SeasonNumber ?? episode?.ParentIndexNumber;
             var episodeNumber = identifiers.EpisodeNumber ?? episode?.IndexNumber;
@@ -93,7 +99,7 @@ internal static class PopfeedItemUrlBuilder
         {
             "movie" when !string.IsNullOrWhiteSpace(identifiers.TmdbId)
                 => $"https://popfeed.social/movie/{Uri.EscapeDataString(identifiers.TmdbId)}",
-            "episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
+            "tv_episode" when !string.IsNullOrWhiteSpace(identifiers.TmdbTvSeriesId)
                 && identifiers.SeasonNumber.HasValue
                 && identifiers.EpisodeNumber.HasValue
                 => $"https://popfeed.social/episode?tvId={Uri.EscapeDataString(identifiers.TmdbTvSeriesId)}&seasonNumber={identifiers.SeasonNumber.Value}&episodeNumber={identifiers.EpisodeNumber.Value}",
