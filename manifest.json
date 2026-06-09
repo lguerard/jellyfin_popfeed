@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.5.2.0",
+        "changelog": "- fix(watched): 🐛 emit tv_episode type so Popfeed routes episodes",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/lguerard/jellyfin_popfeed/releases/download/v0.5.2/Jellyfin.Plugin.Popfeed-v0.5.2.zip",
+        "checksum": "b69f60a2e02101d6b2731d1d3234e785",
+        "timestamp": "2026-06-09T19:01:51.6759753Z"
+      },
+      {
         "version": "0.5.1.0",
         "changelog": "- fix(migration): 🐛 scope legacy purge to plugin-owned creative work types\r\n- fix(atproto): 🐛 treat 400 RecordNotFound as absent in GetRecordAsync",
         "targetAbi": "10.11.0.0",
